@@ -9,7 +9,8 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.anonymous.FreightApplicationClient"
     },
     "android": {
       "adaptiveIcon": {
@@ -31,6 +32,13 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      "@rnmapbox/maps",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Show current location on map."
+        }
+      ],
       "expo-router",
       [
         "expo-location",
@@ -57,7 +65,6 @@
         }
       ]
     ],
-
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true

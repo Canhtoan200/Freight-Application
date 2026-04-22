@@ -1,26 +1,26 @@
-import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { 
-  StyleSheet, 
-  Text, 
-  View, 
-  TextInput, 
-  TouchableOpacity, 
-  Alert, // Thêm thông báo
-  ActivityIndicator, // Hiệu ứng xoay xoay khi đang đợi
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useRouter } from "expo-router";
+import React, { useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function App() {
   const router = useRouter();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');  
-  const [errorMessage, setErrorMessage] = useState('');
+  const [email, setEmail] = useState("canhtoan.work000@gmail.com");
+  const [password, setPassword] = useState("Canhtoan111");
+  const [errorMessage, setErrorMessage] = useState("");
   const [loading, setLoading] = useState(false); // Trạng thái chờ API
 
   const handleLogin = async () => {
-    setErrorMessage('');
+    setErrorMessage("");
     // 1. Kiểm tra đầu vào cơ bản
     if (!email || !password) {
       const msg = "Vui lòng nhập đầy đủ Gmail và Mật khẩu";
@@ -33,34 +33,30 @@ export default function App() {
 
     try {
       // 2. Gửi request đến API
-      const response = await fetch('https://freight-application-server.onrender.com/api/v1/users/login', {
-        method: 'POST',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
+      const response = await fetch(
+        "https://freight-application-server.onrender.com/api/v1/users/login",
+        {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            email: email,
+            password: password,
+          }),
         },
-        body: JSON.stringify({
-          email: email,
-          password: password,
-        }),
-      });
+      );
 
       const data = await response.json();
 
       if (response.ok && data.data != null) {
         // 3. Đăng nhập thành công
-        console.log('Token nhận được:', data.data);
-        setErrorMessage('');
-        const storeData = async (value: string) => {
-          try {
-            await AsyncStorage.setItem('userToken', value);
-          } catch (e) {
-            console.error("Lỗi lưu token", e);
-          }
-        };
-        const token = typeof data.data === 'string' ? data.data : JSON.stringify(data.data);
-        await storeData(token);
-        router.replace('/(tabs)');
+        console.log("Token nhận được:", data.data);
+        setErrorMessage("");
+        // Luôn lưu object user (có position, token...)
+        await AsyncStorage.setItem("userToken", JSON.stringify(data.data));
+        router.replace("/(tabs)");
       } else {
         // 4. Lỗi từ server (sai mật khẩu, user không tồn tại...)
         const msg = data.message || "Thông tin không chính xác";
@@ -81,12 +77,13 @@ export default function App() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.loginBox}>
-        
         {/* Logo công ty */}
         <View style={styles.logoBox}>
           <Text style={styles.logoText}>Logo công ty</Text>
         </View>
-        {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
+        {errorMessage ? (
+          <Text style={styles.errorText}>{errorMessage}</Text>
+        ) : null}
         {/* Ô nhập Gmail */}
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Gmail:</Text>
@@ -111,8 +108,11 @@ export default function App() {
         </View>
 
         {/* Nút Đăng nhập */}
-        <TouchableOpacity 
-          style={[styles.btnLogin, { backgroundColor: loading ? '#ccc' : '#fff' }]} 
+        <TouchableOpacity
+          style={[
+            styles.btnLogin,
+            { backgroundColor: loading ? "#ccc" : "#fff" },
+          ]}
           onPress={handleLogin}
           disabled={loading} // Khóa nút khi đang gửi request
         >
@@ -123,12 +123,10 @@ export default function App() {
           )}
         </TouchableOpacity>
 
-
         {/* Nút Đăng nhập cho khách */}
         <TouchableOpacity style={styles.btnGuest}>
           <Text style={styles.btnText}>Đăng nhập cho khách</Text>
         </TouchableOpacity>
-
       </View>
     </SafeAreaView>
   );
@@ -136,66 +134,66 @@ export default function App() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
   },
   loginBox: {
-    width: '85%',
+    width: "85%",
     padding: 20,
-    alignItems: 'center',
+    alignItems: "center",
     // Nếu muốn có viền bao quanh toàn bộ như bản vẽ:
     borderWidth: 1,
-    borderColor: '#000',
+    borderColor: "#000",
   },
   logoBox: {
     borderWidth: 1,
-    borderColor: '#000',
+    borderColor: "#000",
     paddingVertical: 10,
     paddingHorizontal: 20,
     marginBottom: 40,
   },
   logoText: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: "bold",
   },
   inputGroup: {
-    width: '100%',
+    width: "100%",
     marginBottom: 20,
   },
   label: {
-    textAlign: 'center',
+    textAlign: "center",
     marginBottom: 8,
     fontSize: 16,
   },
   input: {
-    width: '100%',
+    width: "100%",
     height: 40,
     borderWidth: 1,
-    borderColor: '#000',
+    borderColor: "#000",
     paddingHorizontal: 10,
   },
   btnLogin: {
     borderWidth: 1,
-    borderColor: '#000',
+    borderColor: "#000",
     paddingVertical: 8,
     paddingHorizontal: 30,
     marginBottom: 30,
     marginTop: 10,
   },
   btnGuest: {
-    width: '100%',
+    width: "100%",
     borderWidth: 1,
-    borderColor: '#000',
+    borderColor: "#000",
     paddingVertical: 12,
-    alignItems: 'center',
+    alignItems: "center",
   },
   errorText: {
-    width: '100%',
-    color: '#c62828',
-    textAlign: 'center',
+    width: "100%",
+    color: "#c62828",
+    textAlign: "center",
     marginBottom: 12,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   btnText: {
     fontSize: 16,
