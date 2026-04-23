@@ -17,19 +17,17 @@ const Mapbox = (() => {
   }
 })() as any | null;
 
-const INITIAL_LOCATION = {
-  latitude: 10.7769,
-  longitude: 106.7009,
-  zoomLevel: 14,
-};
-
 if (Mapbox && MAPBOX_ACCESS_TOKEN) {
   Mapbox.setAccessToken(MAPBOX_ACCESS_TOKEN);
 }
 
 export default function DriverMapManagement() {
   const cameraRef = useRef<any>(null);
-  const [currentLocation, setCurrentLocation] = useState(INITIAL_LOCATION);
+  const [currentLocation, setCurrentLocation] = useState<{
+    latitude: number;
+    longitude: number;
+    zoomLevel: number;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const canUseMapbox = Boolean(Mapbox && MAPBOX_ACCESS_TOKEN && !IS_EXPO_GO);
   const [errorMessage, setErrorMessage] = useState(
@@ -71,10 +69,6 @@ export default function DriverMapManagement() {
 
         if (isMounted) {
           setCurrentLocation(nextLocation);
-          cameraRef.current?.flyTo(
-            [nextLocation.longitude, nextLocation.latitude],
-            1000,
-          );
         }
       } catch (error) {
         console.error("Lỗi lấy vị trí hiện tại:", error);
@@ -95,41 +89,41 @@ export default function DriverMapManagement() {
     };
   }, [canUseMapbox]);
 
-  const centerCoordinate = [
-    currentLocation.longitude,
-    currentLocation.latitude,
-  ] as [number, number];
+  const centerCoordinate = currentLocation
+    ? ([currentLocation.longitude, currentLocation.latitude] as [number, number])
+    : null;
 
   return (
     <View style={styles.container}>
       {canUseMapbox ? (
-        <Mapbox.MapView
-          style={styles.map}
-          styleURL={MAPBOX_STYLE_URL}
-          compassEnabled={true}
-          logoEnabled={true}
-          scaleBarEnabled={true}
-          onMapLoadingError={() =>
-            setErrorMessage("Mapbox không thể tải dữ liệu bản đồ.")
-          }
-        >
-          <Mapbox.Camera
-            ref={cameraRef}
-            centerCoordinate={centerCoordinate}
-            zoomLevel={currentLocation.zoomLevel}
-            animationMode="flyTo"
-            animationDuration={1000}
-          />
-
-          <Mapbox.PointAnnotation
-            id="current-location-admin"
-            coordinate={centerCoordinate}
-            title="Vị trí hiện tại"
-            snippet="Bản đồ đang định vị thiết bị"
+        centerCoordinate ? (
+          <Mapbox.MapView
+            style={styles.map}
+            styleURL={MAPBOX_STYLE_URL}
+            compassEnabled={true}
+            logoEnabled={true}
+            scaleBarEnabled={true}
+            onMapLoadingError={() =>
+              setErrorMessage("Mapbox không thể tải dữ liệu bản đồ.")
+            }
           >
-            <View style={styles.marker} />
-          </Mapbox.PointAnnotation>
-        </Mapbox.MapView>
+            <Mapbox.Camera
+              ref={cameraRef}
+              centerCoordinate={centerCoordinate}
+              zoomLevel={currentLocation!.zoomLevel}
+              animationMode="none"
+            />
+
+            <Mapbox.PointAnnotation
+              id="current-location-admin"
+              coordinate={centerCoordinate}
+              title="Vị trí hiện tại"
+              snippet="Bản đồ đang định vị thiết bị"
+            >
+              <View style={styles.marker} />
+            </Mapbox.PointAnnotation>
+          </Mapbox.MapView>
+        ) : null
       ) : (
         <View style={styles.missingTokenContainer}>
           <Text style={styles.missingTokenTitle}>
@@ -146,7 +140,7 @@ export default function DriverMapManagement() {
       )}
 
       {loading && (
-        <View style={styles.overlay}>
+        <View style={styles.fullscreenLoader}>
           <ActivityIndicator size="large" color="#000" />
           <Text style={styles.overlayText}>Đang lấy vị trí hiện tại...</Text>
         </View>
@@ -203,15 +197,15 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     backgroundColor: "#fff",
   },
-  overlay: {
+  fullscreenLoader: {
     position: "absolute",
-    top: 16,
-    left: 16,
-    right: 16,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: "rgba(255,255,255,0.95)",
-    padding: 12,
-    borderRadius: 10,
     alignItems: "center",
+    justifyContent: "center",
   },
   overlayText: {
     marginTop: 8,

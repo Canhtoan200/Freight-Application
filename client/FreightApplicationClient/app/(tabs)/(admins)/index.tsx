@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text, View, TouchableOpacity } from "react-native";
 import { useRouter } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type Order = {
   OrderID: number;
@@ -10,17 +9,26 @@ type Order = {
   receiver_name?: string;
   sender_name?: string;
   driver_name?: string;
-  wargon_number?: string;
+  wagon_number?: string;
   shipping_status?: string;
+};
+type Wagon = {
+  WagonID: number;
+  wagon_number?: string;
+  wagon_departure_date?: Date;
 };
 
 export default function AdminHome() {
   const router = useRouter();
   const [orders, setOrders] = useState<Order[]>([]);
+  const [wagons, setWagons] = useState<Wagon[]>([]);
+  const [wagonOrderMap, setWagonOrderMap] = useState<Record<number, Order[]>>({});
   const [loading, setLoading] = useState(true);
+  const [wagonLoading, setWagonLoading] = useState(true);
 
   useEffect(() => {
     fetchOrders();
+    fetchWagons();
   }, []);
 
   const fetchOrders = async () => {
@@ -39,7 +47,51 @@ export default function AdminHome() {
       setLoading(false);
     }
   };
-
+  const fetchWagons = async () => {
+    try {
+      const response = await fetch('https://freight-application-server.onrender.com/api/v1/wagons/getAllWagons');
+      const data = await response.json();
+      if (response.ok) {
+        const wagonList: Wagon[] = data.data || [];
+        setWagons(wagonList);
+        // Fetch order IDs for each wagon in parallel, build a map
+        const entries = await Promise.all(
+          wagonList.map(async (wagon) => {
+            const orderIds = await fetchWagonOrderIds(wagon.WagonID);
+            return [wagon.WagonID, orderIds] as [number, Order[]];
+          })
+        );
+        setWagonOrderMap(Object.fromEntries(entries));
+      } else {
+        console.log("Lỗi", "Không thể tải danh sách toa tàu");
+      }
+    } catch (error) {
+      console.error("Lỗi kết nối", "Không thể kết nối đến máy chủ");
+      console.error(error);
+    } finally {
+      setWagonLoading(false);
+    }
+  };
+  // Returns the full order list linked to a wagon
+  const fetchWagonOrderIds = async (WagonID: number): Promise<Order[]> => {
+    try {
+      const response = await fetch(
+        `https://freight-application-server.onrender.com/api/v1/wagons/getWagonDetailID`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ WagonIDs: WagonID }),
+        }
+      );
+      const data = await response.json();
+      if (response.ok) {
+        return data.data || [];
+      }
+      return [];
+    } catch {
+      return [];
+    }
+  };
   const goToCreateOrder = () => {
     router.push('/(tabs)/(admins)/createOrderManagement');
   };
@@ -51,13 +103,8 @@ export default function AdminHome() {
     });
   };
 
-  const handleLogout = async () => {
-    try {
-      await AsyncStorage.removeItem('userToken');
-      router.replace('/');
-    } catch (error) {
-      console.error('Lỗi khi đăng xuất', error);
-    }
+  const goToCreateWagon = () => {
+    router.push('/(tabs)/(admins)/createWagonManagement');
   };
 
   const renderOrderRow = (order: Order) => (
@@ -67,7 +114,55 @@ export default function AdminHome() {
       <View style={styles.commonCell}><Text style={styles.bodyText}>{order.receiver_name || 'null'}</Text></View>
       <View style={styles.commonCell}><Text style={styles.bodyText}>{order.sender_name || 'null'}</Text></View>
       <View style={styles.commonCell}><Text style={styles.bodyText}>{order.driver_name || 'null'}</Text></View>
-      <View style={styles.commonCell}><Text style={styles.bodyText}>{order.wargon_number || 'null'}</Text></View>
+      <View style={styles.commonCell}><Text style={styles.bodyText}>{order.wagon_number || 'null'}</Text></View>
+      <View style={styles.commonCell}><Text style={styles.bodyText}>{order.shipping_status || 'null'}</Text></View>
+      <TouchableOpacity 
+        style={[styles.commonCell, styles.lastCell]} 
+        onPress={() => goToOrderDetail(order.OrderID)}
+      >
+        <Text style={styles.detailLink}>Xem</Text>
+      </TouchableOpacity>
+    </View>
+  );
+  const renderWagonRow = (wagon: Wagon) => {
+    const wagonOrders: Order[] = wagonOrderMap[wagon.WagonID] || [];
+    return (
+    <View key={wagon.WagonID} style={styles.tableRow}>
+      <View style={styles.wagonRowInner}>
+        <Text style={styles.sectionTitle}>Toa {wagon.wagon_number || 'null'}</Text>
+        <View style={styles.tableHeaderWrapper}>
+          <View style={styles.tableHeader}>
+            <View style={[styles.commonCell, styles.cellLarge]}><Text style={styles.headerText}>Tên hàng</Text></View>
+            <View style={styles.commonCell}><Text style={styles.headerText}>Số lượng</Text></View>
+            <View style={styles.commonCell}><Text style={styles.headerText}>Chủ nhận</Text></View>
+            <View style={styles.commonCell}><Text style={styles.headerText}>Chủ gửi</Text></View>
+            <View style={styles.commonCell}><Text style={styles.headerText}>Phân công Tài xế</Text></View>
+            <View style={styles.commonCell}><Text style={styles.headerText}>Phân công Toa</Text></View>
+            <View style={styles.commonCell}><Text style={styles.headerText}>Trạng thái</Text></View>
+            <View style={[styles.commonCell, styles.lastCell]}><Text style={styles.headerText}>Chi tiết</Text></View>
+          </View>
+        </View>
+        <View style={styles.tableBody}>
+          {wagonLoading ? (
+            <Text style={styles.emptyText}>Đang tải...</Text>
+          ) : wagonOrders.length > 0 ? (
+            wagonOrders.map(renderWagonOrderRow)
+          ) : (
+            <Text style={styles.emptyText}>Chưa có đơn hàng trong toa này</Text>
+          )}
+        </View>
+      </View>
+    </View>
+    );
+  };
+    const renderWagonOrderRow = (order: Order) => (
+    <View key={order.OrderID} style={styles.tableRow}>
+      <View style={[styles.commonCell, styles.cellLarge]}><Text style={styles.bodyText}>{order.order_name || 'null'}</Text></View>
+      <View style={styles.commonCell}><Text style={styles.bodyText}>{order.goods_quantity || '0'}</Text></View>
+      <View style={styles.commonCell}><Text style={styles.bodyText}>{order.receiver_name || 'null'}</Text></View>
+      <View style={styles.commonCell}><Text style={styles.bodyText}>{order.sender_name || 'null'}</Text></View>
+      <View style={styles.commonCell}><Text style={styles.bodyText}>{order.driver_name || 'null'}</Text></View>
+      <View style={styles.commonCell}><Text style={styles.bodyText}>{order.wagon_number || 'null'}</Text></View>
       <View style={styles.commonCell}><Text style={styles.bodyText}>{order.shipping_status || 'null'}</Text></View>
       <TouchableOpacity 
         style={[styles.commonCell, styles.lastCell]} 
@@ -122,7 +217,28 @@ export default function AdminHome() {
             )}
           </View>
         </View>
+        <View style={styles.headerBox}>
+          <View style={styles.pageTitleBox}>
+            <Text style={styles.pageTitle}>Danh sách toa tàu</Text>
+          </View>
 
+          <View style={styles.headerActions}>
+            <TouchableOpacity style={styles.addButton} onPress={goToCreateWagon}>
+              <Text style={styles.addButtonText}>Thêm toa tàu</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+        <View style={styles.sectionBox}>
+          <View style={styles.tableBody}>
+            {loading ? (
+              <Text style={styles.emptyText}>Đang tải...</Text>
+            ) : wagons.length > 0 ? (
+              wagons.map(renderWagonRow)
+            ) : (
+              <Text style={styles.emptyText}>Chưa có toa tàu</Text>
+            )}
+          </View>
+        </View>
       </ScrollView>
   );
 }
@@ -224,6 +340,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
     marginBottom: 12,
+    marginTop: 5,
   },
   tableHeaderWrapper: {
     overflow: 'hidden',
@@ -332,5 +449,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingVertical: 20,
     width: '100%',
+  },
+  wagonRowInner: {
+    flex: 1,
   },
 });

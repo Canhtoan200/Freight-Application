@@ -96,6 +96,17 @@ export default function TabLayout() {
           ),
         }}
       />
+      <Tabs.Screen
+        name="createWagonManagement"
+        options={{
+          title: 'Tạo toa tàu mới',
+          tabBarStyle: { display: 'none' },
+          href: null,
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'list-sharp' : 'list-outline'} color={color} size={24} />
+          ),
+        }}
+      />
     </Tabs>
   );
 }
