@@ -8,26 +8,49 @@ import {
   TextInput,
   Alert,
   Platform,
+  Modal,
 } from "react-native";
 import { useRouter } from "expo-router";
+import DateTimePicker, {
+  DateTimePickerAndroid,
+} from "@react-native-community/datetimepicker";
 
 export default function CreateWagonManagement() {
   const router = useRouter();
 
   const [wagonNumber, setWagonNumber] = useState("");
-  const [departureDateText, setDepartureDateText] = useState("");
+  const [wagonRoute, setWagonRoute] = useState("");
+  const [departureDate, setDepartureDate] = useState<Date | null>(null);
+  const [showIOSPicker, setShowIOSPicker] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  const formatDate = (date: Date) => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const d = String(date.getDate()).padStart(2, "0");
+    const h = String(date.getHours()).padStart(2, "0");
+    const min = String(date.getMinutes()).padStart(2, "0");
+    return `${y}-${m}-${d} ${h}:${min}`;
+  };
+
+  const openDatePicker = () => {
+    if (Platform.OS === "android") {
+      DateTimePickerAndroid.open({
+        value: departureDate ?? new Date(),
+        onChange: (event: any, selectedDate?: Date) => {
+          if (event.type === "set" && selectedDate) {
+            setDepartureDate(selectedDate);
+          }
+        },
+        mode: "date",
+      });
+    } else if (Platform.OS === "ios") {
+      setShowIOSPicker(true);
+    }
+  };
 
   const goBack = () => {
     router.back();
-  };
-
-  // Validate datetime string: accepts "YYYY-MM-DD" or "YYYY-MM-DD HH:MM"
-  const isValidDatetime = (value: string) => {
-    if (!value) return true; // nullable field
-    const dateOnly = /^\d{4}-\d{2}-\d{2}$/;
-    const dateTime = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/;
-    return dateOnly.test(value) || dateTime.test(value);
   };
 
   const handleSubmit = async () => {
@@ -35,20 +58,21 @@ export default function CreateWagonManagement() {
       Alert.alert("Thông báo", "Vui lòng nhập số toa tàu");
       return;
     }
-
-    if (departureDateText && !isValidDatetime(departureDateText)) {
-      Alert.alert(
-        "Thông báo",
-        "Định dạng ngày khởi hành không hợp lệ.\nVui lòng nhập theo dạng: YYYY-MM-DD hoặc YYYY-MM-DD HH:MM"
-      );
+    if (!wagonRoute.trim()) {
+      Alert.alert("Thông báo", "Vui lòng nhập tuyến đường toa");
       return;
     }
 
-    const payload: { wagon_number: string; wagon_departure_date?: string } = {
+    const payload: {
+      wagon_number: string;
+      wagon_route: string;
+      wagon_departure_date?: string;
+    } = {
       wagon_number: wagonNumber.trim(),
+      wagon_route: wagonRoute.trim(),
     };
-    if (departureDateText.trim()) {
-      payload.wagon_departure_date = departureDateText.trim();
+    if (departureDate) {
+      payload.wagon_departure_date = formatDate(departureDate);
     }
 
     setLoading(true);
@@ -67,14 +91,14 @@ export default function CreateWagonManagement() {
       const data = await response.json();
 
       if (response.ok) {
-        console.log("Thành công", data.message || "Tạo toa tàu thành công", [
+        Alert.alert("Thành công", data.message || "Tạo toa tàu thành công", [
           { text: "OK", onPress: goBack },
         ]);
       } else {
-        console.log("Lỗi", data.message || "Tạo toa tàu thất bại");
+        Alert.alert("Lỗi", data.message || "Tạo toa tàu thất bại");
       }
     } catch (error) {
-      console.log(
+      Alert.alert(
         "Lỗi kết nối",
         "Không thể kết nối đến máy chủ. Vui lòng kiểm tra kết nối Internet."
       );
@@ -110,19 +134,76 @@ export default function CreateWagonManagement() {
           />
         </View>
 
+        {/* Wagon Route */}
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>
+            Tuyến đường toa <Text style={styles.required}>*</Text>
+          </Text>
+          <TextInput
+            style={styles.input}
+            value={wagonRoute}
+            onChangeText={setWagonRoute}
+            placeholder="Nhập tuyến đường toa (VD: Hà Nội - TP.HCM)"
+          />
+        </View>
+
         {/* Departure Date */}
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Ngày khởi hành</Text>
-          <TextInput
-            style={styles.input}
-            value={departureDateText}
-            onChangeText={setDepartureDateText}
-            placeholder="YYYY-MM-DD HH:MM (không bắt buộc)"
-            keyboardType={Platform.OS === "ios" ? "default" : "default"}
-          />
-          <Text style={styles.hintText}>
-            Ví dụ: 2026-04-25 08:30
-          </Text>
+          {Platform.OS === "web" ? (
+            <TextInput
+              style={styles.input}
+              value={departureDate ? formatDate(departureDate) : ""}
+              onChangeText={(text) => {
+                const parsed = new Date(text);
+                if (!isNaN(parsed.getTime())) setDepartureDate(parsed);
+              }}
+              placeholder="YYYY-MM-DD HH:MM (không bắt buộc)"
+            />
+          ) : (
+            <TouchableOpacity
+              style={[styles.input, styles.dateButton]}
+              onPress={openDatePicker}
+            >
+              <Text
+                style={
+                  departureDate ? styles.dateText : styles.datePlaceholder
+                }
+              >
+                {departureDate
+                  ? formatDate(departureDate)
+                  : "Chọn ngày khởi hành (không bắt buộc)"}
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          {/* iOS date picker modal */}
+          {Platform.OS === "ios" && (
+            <Modal
+              transparent
+              visible={showIOSPicker}
+              animationType="slide"
+            >
+              <View style={styles.modalOverlay}>
+                <View style={styles.modalContent}>
+                  <DateTimePicker
+                    value={departureDate ?? new Date()}
+                    mode="datetime"
+                    display="spinner"
+                    onChange={(_event: any, selectedDate?: Date) => {
+                      if (selectedDate) setDepartureDate(selectedDate);
+                    }}
+                  />
+                  <TouchableOpacity
+                    style={styles.modalDone}
+                    onPress={() => setShowIOSPicker(false)}
+                  >
+                    <Text style={styles.modalDoneText}>Xong</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </Modal>
+          )}
         </View>
 
         {/* Submit */}
@@ -141,8 +222,8 @@ export default function CreateWagonManagement() {
       <View style={styles.infoBox}>
         <Text style={styles.infoTitle}>Lưu ý:</Text>
         <Text style={styles.infoText}>• Số toa tàu là bắt buộc và phải duy nhất</Text>
+        <Text style={styles.infoText}>• Tuyến đường toa là bắt buộc</Text>
         <Text style={styles.infoText}>• Ngày khởi hành có thể bổ sung sau</Text>
-        <Text style={styles.infoText}>• Định dạng ngày: YYYY-MM-DD hoặc YYYY-MM-DD HH:MM</Text>
       </View>
     </ScrollView>
   );
@@ -204,10 +285,37 @@ const styles = StyleSheet.create({
     fontSize: 14,
     backgroundColor: "#fff",
   },
-  hintText: {
-    fontSize: 12,
-    color: "#888",
-    marginTop: 4,
+  dateButton: {
+    justifyContent: "center",
+  },
+  dateText: {
+    fontSize: 14,
+    color: "#333",
+  },
+  datePlaceholder: {
+    fontSize: 14,
+    color: "#aaa",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "flex-end",
+  },
+  modalContent: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingBottom: 24,
+  },
+  modalDone: {
+    alignItems: "flex-end",
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+  },
+  modalDoneText: {
+    color: "#007AFF",
+    fontSize: 16,
+    fontWeight: "600",
   },
   submitButton: {
     backgroundColor: "#007AFF",

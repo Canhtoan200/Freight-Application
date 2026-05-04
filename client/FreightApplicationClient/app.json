@@ -63,7 +63,8 @@
         {
           "RNMapboxMapsImpl": "mapbox"
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true,

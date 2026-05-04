@@ -122,16 +122,6 @@ export default function CreateOrder() {
         </View>
 
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Chủ nhận <Text style={styles.required}>*</Text></Text>
-          <TextInput
-            style={styles.input}
-            value={formData.chuNhan}
-            onChangeText={(value) => handleInputChange('chuNhan', value)}
-            placeholder="Nhập tên chủ nhận"
-          />
-        </View>
-
-        <View style={styles.inputGroup}>
           <Text style={styles.label}>Chủ gửi <Text style={styles.required}>*</Text></Text>
           <TextInput
             style={styles.input}
@@ -142,12 +132,12 @@ export default function CreateOrder() {
         </View>
 
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Địa chỉ người nhận <Text style={styles.required}>*</Text></Text>
+          <Text style={styles.label}>Chủ nhận <Text style={styles.required}>*</Text></Text>
           <TextInput
             style={styles.input}
-            value={formData.diaChiNhan}
-            onChangeText={(value) => handleInputChange('diaChiNhan', value)}
-            placeholder="Nhập địa chỉ người nhận"
+            value={formData.chuNhan}
+            onChangeText={(value) => handleInputChange('chuNhan', value)}
+            placeholder="Nhập tên chủ nhận"
           />
         </View>
 
@@ -162,13 +152,12 @@ export default function CreateOrder() {
         </View>
 
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Số điện thoại người nhận <Text style={styles.required}>*</Text></Text>
+          <Text style={styles.label}>Địa chỉ người nhận <Text style={styles.required}>*</Text></Text>
           <TextInput
             style={styles.input}
-            value={formData.soDienthoaiNhan}
-            onChangeText={(value) => handleInputChange('soDienthoaiNhan', value)}
-            placeholder="Nhập số điện thoại người nhận"
-            keyboardType="phone-pad"
+            value={formData.diaChiNhan}
+            onChangeText={(value) => handleInputChange('diaChiNhan', value)}
+            placeholder="Nhập địa chỉ người nhận"
           />
         </View>
 
@@ -179,6 +168,17 @@ export default function CreateOrder() {
             value={formData.soDienthoaiGui}
             onChangeText={(value) => handleInputChange('soDienthoaiGui', value)}
             placeholder="Nhập số điện thoại người gửi"
+            keyboardType="phone-pad"
+          />
+        </View>
+        
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>Số điện thoại người nhận <Text style={styles.required}>*</Text></Text>
+          <TextInput
+            style={styles.input}
+            value={formData.soDienthoaiNhan}
+            onChangeText={(value) => handleInputChange('soDienthoaiNhan', value)}
+            placeholder="Nhập số điện thoại người nhận"
             keyboardType="phone-pad"
           />
         </View>
