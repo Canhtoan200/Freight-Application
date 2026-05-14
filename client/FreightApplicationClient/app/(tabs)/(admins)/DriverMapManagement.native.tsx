@@ -1,4 +1,4 @@
-import Ionicons from "@expo/vector-icons/build/Ionicons";
+import Ionicons from '@expo/vector-icons/Ionicons';
 import Constants from "expo-constants";
 import * as Location from "expo-location";
 import React, { useEffect, useRef, useState } from "react";
@@ -18,6 +18,19 @@ type Order = {
   goods_weight?: string;
   goods_volumn?: string;
   organization?: string;
+};
+
+type Driver = {
+  DriverID: number;
+  driver_name?: string;
+  driver_link?: string;
+  driver_license_plate_number?: string;
+  driver_phone_number?: string;
+  amount_of_gas?: number;
+  money_amount_of_gas?: number;
+  the_remaining_volume_of_the_car?: number;
+  the_remaining_weight_of_the_car?: number;
+  drop_off_distance?: number;
 };
 
 const MAPBOX_ACCESS_TOKEN = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN ?? "";
@@ -42,6 +55,9 @@ export default function DriverMapManagement() {
   const insets = useSafeAreaInsets();
   const cameraRef = useRef<any>(null);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [viewMode, setViewMode] = useState<'order' | 'driver'>('order');
+  const [selectedDriverID, setSelectedDriverID] = useState<number | null>(null);
   const [currentLocation, setCurrentLocation] = useState<{
     latitude: number;
     longitude: number;
@@ -50,6 +66,8 @@ export default function DriverMapManagement() {
   const [loading, setLoading] = useState(true);
   const [selectedOrderID, setSelectedOrderID] = useState<number | null>(null);
   const [selectedOrderCoordinate, setSelectedOrderCoordinate] = useState<[number, number] | null>(null);
+  const [selectedDriverCoordinate, setSelectedDriverCoordinate] = useState<[number, number] | null>(null);
+  const [routeCoordinates, setRouteCoordinates] = useState<[number, number][] | null>(null);
   const canUseMapbox = Boolean(Mapbox && MAPBOX_ACCESS_TOKEN && !IS_EXPO_GO);
   const [errorMessage, setErrorMessage] = useState(
     IS_EXPO_GO
@@ -60,6 +78,7 @@ export default function DriverMapManagement() {
   );
 
   useEffect(() => {
+    fetchDriverDetauls();
     fetchOrderStatus();
     let isMounted = true;
 
@@ -109,6 +128,15 @@ export default function DriverMapManagement() {
       isMounted = false;
     };
   }, [canUseMapbox]);
+
+  useEffect(() => {
+    if (selectedDriverCoordinate && selectedOrderCoordinate) {
+      fetchRoute(selectedDriverCoordinate, selectedOrderCoordinate);
+    } else {
+      setRouteCoordinates(null);
+    }
+  }, [selectedDriverCoordinate, selectedOrderCoordinate]);
+
   const fetchOrderStatus = async () => {
     try {
       const response = await fetch('https://freight-application-server.onrender.com/api/v1/orders/getAllOrderByStatus', {
@@ -142,12 +170,29 @@ export default function DriverMapManagement() {
       setLoading(false);
     }
   };
+  const fetchDriverDetauls = async () => {
+    try {
+      const response = await fetch('https://freight-application-server.onrender.com/api/v1/drivers/getAllDrivers');
+      const data = await response.json();
+      if (response.ok) {
+        setDrivers(data.data || []);
+      } else {
+        console.log("Lỗi", "Không thể tải danh sách tài xế");
+      }
+    } catch (error) {
+      console.error("Lỗi kết nối", "Không thể kết nối đến máy chủ");
+      console.error(error);
+    }
+  }
   const SelectedOrder = async (selectedOrder: Order) => {
     setSelectedOrderID(selectedOrder.OrderID);
     setSelectedOrderCoordinate(null);
-    const features = await searchAddress(selectedOrder);
-    if (features && features.length > 0) {
-      const [longitude, latitude] = features[0].center;
+    setSelectedDriverCoordinate(null);
+
+    // Geocode sender address
+    const orderFeatures = await searchAddress(selectedOrder.sender_address);
+    if (orderFeatures && orderFeatures.length > 0) {
+      const [longitude, latitude] = orderFeatures[0].geometry.coordinates;
       const coord: [number, number] = [longitude, latitude];
       setSelectedOrderCoordinate(coord);
       if (cameraRef.current) {
@@ -158,9 +203,26 @@ export default function DriverMapManagement() {
         });
       }
     }
+
+    // Geocode driver_link address for the assigned driver
+    const matchedDriver = drivers.find(d => d.driver_name === selectedOrder.driver_name);
+    if (matchedDriver?.driver_link) {
+      const driverFeatures = await searchAddress(matchedDriver.driver_link);
+      if (driverFeatures && driverFeatures.length > 0) {
+        const [longitude, latitude] = driverFeatures[0].geometry.coordinates;
+        setSelectedDriverCoordinate([longitude, latitude]);
+        if (cameraRef.current) {
+        cameraRef.current.setCamera({
+          centerCoordinate: [longitude, latitude],
+          zoomLevel: 15,
+          animationDuration: 1000,
+        });
+      }
+      }
+    }
   };
-  const renderOrderRow = (order: Order) => (
-    <View key={order.OrderID}>
+  const renderOrderRow = (order: Order, index: number) => (
+    <View key={order.OrderID ?? index}>
       <TouchableOpacity onPress={() => SelectedOrder(order)}>
       <Text style={styles.panelContent} numberOfLines={1}>
         #{order.OrderID} – {order.organization || order.sender_name || "Khách hàng"} {"\n"}
@@ -169,6 +231,97 @@ export default function DriverMapManagement() {
       </TouchableOpacity>
     </View>
   );
+  const SelectedDriver = async (driver: Driver) => {
+    setSelectedDriverID(driver.DriverID);
+    setSelectedDriverCoordinate(null);
+    if (!driver.driver_link) return;
+    const features = await searchAddress(driver.driver_link);
+    if (features && features.length > 0) {
+      const [longitude, latitude] = features[0].geometry.coordinates;
+      const coord: [number, number] = [longitude, latitude];
+      setSelectedDriverCoordinate(coord);
+      if (cameraRef.current) {
+        cameraRef.current.setCamera({
+          centerCoordinate: coord,
+          zoomLevel: 15,
+          animationDuration: 1000,
+        });
+      }
+    }
+  };
+
+  const renderDriverRow = (driver: Driver, index: number) => (
+    <View key={driver.DriverID ?? index}>
+      <TouchableOpacity onPress={() => SelectedDriver(driver)}>
+        <Text style={styles.panelContent} numberOfLines={1}>
+          {driver.driver_name || 'Tài xế'} – {driver.driver_license_plate_number || '—'}{"\n"}
+        </Text>
+        <View style={styles.divider} />
+      </TouchableOpacity>
+    </View>
+  );
+
+  const renderDriverDetail = (driverID: number) => {
+    const driver = drivers.find(d => d.DriverID === driverID);
+    if (!driver) return null;
+
+    return (
+      <View key={driverID} style={styles.bottomPanel}>
+        <View style={styles.dragHandle} />
+        <View style={styles.panelHeader}>
+          <TouchableOpacity onPress={() => setSelectedDriverID(null)} style={styles.closeButton}>
+            <Ionicons name="arrow-back" size={20} color="#64748b" />
+          </TouchableOpacity>
+          <Text style={styles.panelHeaderTitle}>Chi tiết tài xế</Text>
+          <TouchableOpacity onPress={() => { setSelectedDriverID(null); setViewMode('order'); }} style={styles.closeButton}>
+            <Ionicons name="close" size={20} color="#64748b" />
+          </TouchableOpacity>
+        </View>
+        <ScrollView style={styles.panelBody} showsVerticalScrollIndicator={false}>
+          <Text style={styles.orderName}>{driver.driver_name || '—'}</Text>
+          <View style={styles.infoRow}>
+            <Ionicons name="call-outline" size={16} color="#64748b" />
+            <Text style={styles.infoText}>{driver.driver_phone_number || '—'}</Text>
+          </View>
+          <View style={styles.infoRow}>
+            <Ionicons name="car-outline" size={16} color="#64748b" />
+            <Text style={styles.infoText}>{driver.driver_license_plate_number || '—'}</Text>
+          </View>
+          <View style={styles.infoDivider} />
+          <View style={styles.statsRow}>
+            <View style={styles.statItem}>
+              <Text style={styles.statLabel}>Tải trọng còn</Text>
+              <Text style={styles.statValue}>{driver.the_remaining_weight_of_the_car ?? '—'}kg</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.statItem}>
+              <Text style={styles.statLabel}>Thể tích còn</Text>
+              <Text style={styles.statValue}>{driver.the_remaining_volume_of_the_car ?? '—'} lít</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.statItem}>
+              <Text style={styles.statLabel}>Khoảng cách</Text>
+              {/* Distance from driver to sender_address location */}
+              <Text style={styles.statValue}>
+                {selectedDriverCoordinate && selectedOrderCoordinate
+                  ? `${calculateDistance(selectedDriverCoordinate, selectedOrderCoordinate)}km`
+                  : driver.drop_off_distance != null
+                    ? `${driver.drop_off_distance}km`
+                    : '—'}
+              </Text>
+            </View>
+          </View>
+        </ScrollView>
+        <View style={styles.panelFooter}>
+          <TouchableOpacity style={styles.submitButton} onPress={() => { setSelectedDriverID(null); setViewMode('order'); }}>
+            <Ionicons name="checkmark-circle-outline" size={20} color="#fff" />
+            <Text style={styles.submitText}>Xác nhận tài xế</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
+
   const renderOrderDriver = (orderID: number) => {
     const order = orders.find(o => o.OrderID === orderID);
     if (!order) return null;
@@ -181,7 +334,7 @@ export default function DriverMapManagement() {
         {/* Header */}
         <View style={styles.panelHeader}>
           <Text style={styles.panelHeaderTitle}>Chi tiết đơn hàng</Text>
-          <TouchableOpacity onPress={() => setSelectedOrderID(null)} style={styles.closeButton}>
+          <TouchableOpacity onPress={() => { setSelectedOrderID(null); setSelectedDriverCoordinate(null); }} style={styles.closeButton}>
             <Ionicons name="close" size={20} color="#64748b" />
           </TouchableOpacity>
         </View>
@@ -219,7 +372,7 @@ export default function DriverMapManagement() {
 
         {/* Action Button */}
         <View style={styles.panelFooter}>
-          <TouchableOpacity style={styles.submitButton}>
+          <TouchableOpacity style={styles.submitButton} onPress={() => { setViewMode('driver'); setSelectedOrderID(null); }}>
             <Ionicons name="checkmark-circle-outline" size={20} color="#fff" />
             <Text style={styles.submitText}>Đi đến chọn tài xế</Text>
           </TouchableOpacity>
@@ -240,31 +393,90 @@ export default function DriverMapManagement() {
     });
   }
   };
-  const searchAddress = async (order: Order) => {
+  const fetchRoute = async (from: [number, number], to: [number, number]) => {
     const token = "pk.eyJ1IjoiY2FuaHRvYW4wMDAiLCJhIjoiY21vNm84OXo1MjN4ZzJ5b2VjcjdwNzlheCJ9.ZUs6kySzEPQxOJ995AG5iw";
+    const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${from[0]},${from[1]};${to[0]},${to[1]}?geometries=geojson&overview=full&access_token=${token}`;
+    try {
+      const response = await fetch(url);
+      const data = await response.json();
+      if (data.routes && data.routes.length > 0) {
+        setRouteCoordinates(data.routes[0].geometry.coordinates);
+        if (cameraRef.current) {
+          const lngs = [from[0], to[0]];
+          const lats = [from[1], to[1]];
+          cameraRef.current.fitBounds(
+            [Math.max(...lngs), Math.max(...lats)],
+            [Math.min(...lngs), Math.min(...lats)],
+            [80, 80, 80, 80],
+            1000,
+          );
+        }
+      } else {
+        setRouteCoordinates(null);
+      }
+    } catch (error) {
+      console.error("Lỗi lấy tuyến đường:", error);
+      setRouteCoordinates(null);
+    }
+  };
+
+  const calculateDistance = (coord1: [number, number], coord2: [number, number]): number => {
+    const [lon1, lat1] = coord1;
+    const [lon2, lat2] = coord2;
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    return Math.round(6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) * 10) / 10;
+  };
+
+  const searchAddress = async (address: string | undefined) => {
+    // 1. Get your API Key from account.goong.io (Do NOT use Mapbox token here)
+    const GOONG_API_KEY = "PMor1h7L82tghzCo91QQw60zpBrbYNP2ZapzDdIQ"; 
     
-    if (!order.sender_address) {
-      console.warn("sender_address is undefined");
+    if (!address) {
+      console.warn("address is undefined");
       return [];
     }
 
-    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(order.sender_address)}.json?access_token=${token}&limit=1&country=vn&language=vi`;
+    // 2. Goong forward geocoding endpoint structure
+    const url = `https://rsapi.goong.io/Geocode?address=${encodeURIComponent(address)}&api_key=${GOONG_API_KEY}`;
     
     try {
       const response = await fetch(url);
       const data = await response.json();
       
-      if (data.features && data.features.length > 0) {
-        return data.features;
+      // 3. Goong returns data inside a 'results' array instead of Mapbox's 'features'
+      if (data.results && data.results.length > 0) {
+        const topResult = data.results[0];
+        const { lat, lng } = topResult.geometry.location;
+        
+        console.log("Found location matching Goong:", topResult.formatted_address);
+        console.log(`Coordinates extracted: Latitude: ${lat}, Longitude: ${lng}`);
+
+        // 4. Transform the format so your Mapbox Map Camera can ingest it [lng, lat]
+        const simulatedFeatures = [{
+          geometry: {
+            type: "Point",
+            coordinates: [lng, lat] // Keep it [lng, lat] for Mapbox Map compatibility
+          },
+          place_name: topResult.formatted_address
+        }];
+
+        return simulatedFeatures;
       } else {
-        console.log("Không tìm thấy địa chỉ phù hợp");
+        console.log("Không tìm thấy địa chỉ phù hợp từ Goong");
         return [];
       }
     } catch (error) {
-      console.error("Lỗi gọi API Mapbox:", error);
+      console.error("Lỗi gọi API Goong:", error);
       return [];
     }
   };
+
 
   return (
     <View style={styles.container}>
@@ -302,8 +514,40 @@ export default function DriverMapManagement() {
                 <View style={styles.orderMarker}>
                   <Ionicons name="location" size={28} color="#dc2626" />
                 </View>
-                <Mapbox.Callout title="Địa chỉ đơn hàng" />
+                <Mapbox.Callout title="Địa chỉ gửi hàng" />
               </Mapbox.PointAnnotation>
+            )}
+            {selectedDriverCoordinate && (
+              <Mapbox.PointAnnotation
+                id="selected-driver-location"
+                coordinate={selectedDriverCoordinate}
+              >
+                <View style={styles.driverMarker}>
+                  <Ionicons name="car-sport" size={24} color="black" />
+                </View>
+                <Mapbox.Callout title="Vị trí tài xế" />
+              </Mapbox.PointAnnotation>
+            )}
+            {routeCoordinates && (
+              <Mapbox.ShapeSource
+                id="route-source"
+                shape={{
+                  type: 'Feature',
+                  properties: {},
+                  geometry: { type: 'LineString', coordinates: routeCoordinates },
+                }}
+              >
+                <Mapbox.LineLayer
+                  id="route-layer"
+                  style={{
+                    lineColor: '#2563eb',
+                    lineWidth: 4,
+                    lineOpacity: 0.85,
+                    lineCap: 'round',
+                    lineJoin: 'round',
+                  }}
+                />
+              </Mapbox.ShapeSource>
             )}
           </Mapbox.MapView>
           {/* Floating Action Button */}
@@ -315,16 +559,37 @@ export default function DriverMapManagement() {
             <Ionicons name="locate" size={24} color="#2563eb" />
           </TouchableOpacity>
           <View style={[styles.topRightPanel, { top: insets.top - 30 }]}>
-            <Text style={styles.panelTitle}>Danh sách khách hàng đã lên đơn hàng:</Text>
-            {loading ? (
-              <Text style={styles.emptyText}>Đang tải...</Text>
-            ) : orders.length > 0 ? (
-              orders.map(renderOrderRow)
+            {viewMode === 'order' ? (
+              <>
+                <Text style={styles.panelTitle}>Danh sách khách hàng đã lên đơn hàng:</Text>
+                {loading ? (
+                  <Text style={styles.emptyText}>Đang tải...</Text>
+                ) : orders.length > 0 ? (
+                  orders.map(renderOrderRow)
+                ) : (
+                  <Text style={styles.emptyText}>Chưa có đơn hàng đang vận chuyển</Text>
+                )}
+              </>
             ) : (
-              <Text style={styles.emptyText}>Chưa có đơn hàng đang vận chuyển</Text>
+              <>
+                <View style={styles.driverPanelHeader}>
+                  <TouchableOpacity onPress={() => { setViewMode('order'); setSelectedDriverID(null); }} style={styles.backButton}>
+                    <Ionicons name="arrow-back" size={16} color="#2563eb" />
+                  </TouchableOpacity>
+                  <Text style={styles.panelTitle}>Danh sách tài xế:</Text>
+                </View>
+                {loading ? (
+                  <Text style={styles.emptyText}>Đang tải...</Text>
+                ) : drivers.length > 0 ? (
+                  drivers.map(renderDriverRow)
+                ) : (
+                  <Text style={styles.emptyText}>Chưa có tài xế</Text>
+                )}
+              </>
             )}
           </View>
-          {selectedOrderID !== null && renderOrderDriver(selectedOrderID)}
+          {viewMode === 'order' && selectedOrderID !== null && renderOrderDriver(selectedOrderID)}
+          {viewMode === 'driver' && selectedDriverID !== null && renderDriverDetail(selectedDriverID)}
           </> 
         ) : null
       ) : (
@@ -400,6 +665,12 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     backgroundColor: "#fff",
   },  orderMarker: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  driverMarker: {
+    width: 40,
+    height: 40,
     alignItems: 'center',
     justifyContent: 'center',
   },  fullscreenLoader: {
@@ -603,5 +874,19 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '700',
+  },
+  driverPanelHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  backButton: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#eff6ff',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

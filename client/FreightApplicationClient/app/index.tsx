@@ -52,7 +52,6 @@ export default function App() {
 
       if (response.ok && data.data != null) {
         // 3. Đăng nhập thành công
-        console.log("Token nhận được:", data.data);
         setErrorMessage("");
         // Luôn lưu object user (có position, token...)
         await AsyncStorage.setItem("userToken", JSON.stringify(data.data));
