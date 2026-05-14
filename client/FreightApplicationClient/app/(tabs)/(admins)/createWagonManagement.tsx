@@ -22,6 +22,8 @@ export default function CreateWagonManagement() {
   const [wagonRoute, setWagonRoute] = useState("");
   const [departureDate, setDepartureDate] = useState<Date | null>(null);
   const [showIOSPicker, setShowIOSPicker] = useState(false);
+  const [arrivalDate, setArrivalDate] = useState<Date | null>(null);
+  const [showIOSArrivalPicker, setShowIOSArrivalPicker] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const formatDate = (date: Date) => {
@@ -49,6 +51,22 @@ export default function CreateWagonManagement() {
     }
   };
 
+  const openArrivalDatePicker = () => {
+    if (Platform.OS === "android") {
+      DateTimePickerAndroid.open({
+        value: arrivalDate ?? new Date(),
+        onChange: (event: any, selectedDate?: Date) => {
+          if (event.type === "set" && selectedDate) {
+            setArrivalDate(selectedDate);
+          }
+        },
+        mode: "date",
+      });
+    } else if (Platform.OS === "ios") {
+      setShowIOSArrivalPicker(true);
+    }
+  };
+
   const goBack = () => {
     router.back();
   };
@@ -73,6 +91,9 @@ export default function CreateWagonManagement() {
     };
     if (departureDate) {
       payload.wagon_departure_date = formatDate(departureDate);
+    }
+    if (arrivalDate) {
+      (payload as any).wagon_arrival_date = formatDate(arrivalDate);
     }
 
     setLoading(true);
@@ -149,7 +170,7 @@ export default function CreateWagonManagement() {
 
         {/* Departure Date */}
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Ngày khởi hành</Text>
+          <Text style={styles.label}>Ngày khởi hành<Text style={styles.required}>*</Text></Text>
           {Platform.OS === "web" ? (
             <TextInput
               style={styles.input}
@@ -176,8 +197,7 @@ export default function CreateWagonManagement() {
               </Text>
             </TouchableOpacity>
           )}
-
-          {/* iOS date picker modal */}
+          {/* iOS date picker modal - Departure */}
           {Platform.OS === "ios" && (
             <Modal
               transparent
@@ -206,6 +226,60 @@ export default function CreateWagonManagement() {
           )}
         </View>
 
+        {/* Arrival Date */}
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>Ngày đến<Text style={styles.required}>*</Text></Text>
+          {Platform.OS === "web" ? (
+            <TextInput
+              style={styles.input}
+              value={arrivalDate ? formatDate(arrivalDate) : ""}
+              onChangeText={(text) => {
+                const parsed = new Date(text);
+                if (!isNaN(parsed.getTime())) setArrivalDate(parsed);
+              }}
+              placeholder="YYYY-MM-DD HH:MM"
+            />
+          ) : (
+            <TouchableOpacity
+              style={[styles.input, styles.dateButton]}
+              onPress={openArrivalDatePicker}
+            >
+              <Text
+                style={arrivalDate ? styles.dateText : styles.datePlaceholder}
+              >
+                {arrivalDate ? formatDate(arrivalDate) : "Chọn ngày đến"}
+              </Text>
+            </TouchableOpacity>
+          )}
+          {/* iOS date picker modal - Arrival */}
+          {Platform.OS === "ios" && (
+            <Modal
+              transparent
+              visible={showIOSArrivalPicker}
+              animationType="slide"
+            >
+              <View style={styles.modalOverlay}>
+                <View style={styles.modalContent}>
+                  <DateTimePicker
+                    value={arrivalDate ?? new Date()}
+                    mode="datetime"
+                    display="spinner"
+                    onChange={(_event: any, selectedDate?: Date) => {
+                      if (selectedDate) setArrivalDate(selectedDate);
+                    }}
+                  />
+                  <TouchableOpacity
+                    style={styles.modalDone}
+                    onPress={() => setShowIOSArrivalPicker(false)}
+                  >
+                    <Text style={styles.modalDoneText}>Xong</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </Modal>
+          )}
+        </View>
+
         {/* Submit */}
         <TouchableOpacity
           style={[styles.submitButton, loading && styles.submitButtonDisabled]}
@@ -223,7 +297,8 @@ export default function CreateWagonManagement() {
         <Text style={styles.infoTitle}>Lưu ý:</Text>
         <Text style={styles.infoText}>• Số toa tàu là bắt buộc và phải duy nhất</Text>
         <Text style={styles.infoText}>• Tuyến đường toa là bắt buộc</Text>
-        <Text style={styles.infoText}>• Ngày khởi hành có thể bổ sung sau</Text>
+        <Text style={styles.infoText}>• Ngày khởi hành là bắt buộc</Text>
+        <Text style={styles.infoText}>• Ngày đến là bắt buộc</Text>
       </View>
     </ScrollView>
   );

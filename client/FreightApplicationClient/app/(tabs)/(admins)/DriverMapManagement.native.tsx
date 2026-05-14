@@ -21,7 +21,7 @@ type Order = {
 };
 
 type Driver = {
-  DriverID: number;
+  DriverIDs: number;
   driver_name?: string;
   driver_link?: string;
   driver_license_plate_number?: string;
@@ -232,7 +232,7 @@ export default function DriverMapManagement() {
     </View>
   );
   const SelectedDriver = async (driver: Driver) => {
-    setSelectedDriverID(driver.DriverID);
+    setSelectedDriverID(driver.DriverIDs);
     setSelectedDriverCoordinate(null);
     if (!driver.driver_link) return;
     const features = await searchAddress(driver.driver_link);
@@ -249,9 +249,33 @@ export default function DriverMapManagement() {
       }
     }
   };
-
+  const submitDriverOrder = async () => {
+    if (!selectedDriverID || !selectedOrderID) return;
+    try {
+      const response = await fetch('https://freight-application-server.onrender.com/api/v1/drivers/createDriverOrderDetail', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          DriverIDs: selectedDriverID,
+          OrderIDs: [selectedOrderID],
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        console.error("Lỗi xác nhận tài xế:", data.message);
+      }
+    } catch (error) {
+      console.error("Lỗi kết nối:", error);
+    }
+    setSelectedOrderID(null);
+    setSelectedDriverID(null);
+    setViewMode('order');
+    fetchOrderStatus();
+  };
   const renderDriverRow = (driver: Driver, index: number) => (
-    <View key={driver.DriverID ?? index}>
+    <View key={driver.DriverIDs ?? index}>
       <TouchableOpacity onPress={() => SelectedDriver(driver)}>
         <Text style={styles.panelContent} numberOfLines={1}>
           {driver.driver_name || 'Tài xế'} – {driver.driver_license_plate_number || '—'}{"\n"}
@@ -262,7 +286,7 @@ export default function DriverMapManagement() {
   );
 
   const renderDriverDetail = (driverID: number) => {
-    const driver = drivers.find(d => d.DriverID === driverID);
+    const driver = drivers.find(d => d.DriverIDs === driverID);
     if (!driver) return null;
 
     return (
@@ -313,7 +337,7 @@ export default function DriverMapManagement() {
           </View>
         </ScrollView>
         <View style={styles.panelFooter}>
-          <TouchableOpacity style={styles.submitButton} onPress={() => { setSelectedDriverID(null); setViewMode('order'); }}>
+          <TouchableOpacity style={styles.submitButton} onPress={submitDriverOrder}>
             <Ionicons name="checkmark-circle-outline" size={20} color="#fff" />
             <Text style={styles.submitText}>Xác nhận tài xế</Text>
           </TouchableOpacity>
@@ -372,7 +396,7 @@ export default function DriverMapManagement() {
 
         {/* Action Button */}
         <View style={styles.panelFooter}>
-          <TouchableOpacity style={styles.submitButton} onPress={() => { setViewMode('driver'); setSelectedOrderID(null); }}>
+          <TouchableOpacity style={styles.submitButton} onPress={() => { setViewMode('driver'); }}>
             <Ionicons name="checkmark-circle-outline" size={20} color="#fff" />
             <Text style={styles.submitText}>Đi đến chọn tài xế</Text>
           </TouchableOpacity>
@@ -394,7 +418,7 @@ export default function DriverMapManagement() {
   }
   };
   const fetchRoute = async (from: [number, number], to: [number, number]) => {
-    const token = "pk.eyJ1IjoiY2FuaHRvYW4wMDAiLCJhIjoiY21vNm84OXo1MjN4ZzJ5b2VjcjdwNzlheCJ9.ZUs6kySzEPQxOJ995AG5iw";
+    const token = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN;
     const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${from[0]},${from[1]};${to[0]},${to[1]}?geometries=geojson&overview=full&access_token=${token}`;
     try {
       const response = await fetch(url);
@@ -435,7 +459,7 @@ export default function DriverMapManagement() {
 
   const searchAddress = async (address: string | undefined) => {
     // 1. Get your API Key from account.goong.io (Do NOT use Mapbox token here)
-    const GOONG_API_KEY = "PMor1h7L82tghzCo91QQw60zpBrbYNP2ZapzDdIQ"; 
+    const GOONG_API_KEY = process.env.EXPO_PUBLIC_GOONG_API_KEY;
     
     if (!address) {
       console.warn("address is undefined");
@@ -453,9 +477,6 @@ export default function DriverMapManagement() {
       if (data.results && data.results.length > 0) {
         const topResult = data.results[0];
         const { lat, lng } = topResult.geometry.location;
-        
-        console.log("Found location matching Goong:", topResult.formatted_address);
-        console.log(`Coordinates extracted: Latitude: ${lat}, Longitude: ${lng}`);
 
         // 4. Transform the format so your Mapbox Map Camera can ingest it [lng, lat]
         const simulatedFeatures = [{
