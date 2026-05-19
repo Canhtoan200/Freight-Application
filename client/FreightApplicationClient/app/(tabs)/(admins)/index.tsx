@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useState } from "react";
+import { useFocusEffect } from "expo-router";
 import { ScrollView, StyleSheet, Text, View, TouchableOpacity } from "react-native";
 import { useRouter } from 'expo-router';
 
@@ -10,6 +11,7 @@ type Order = {
   sender_name?: string;
   driver_name?: string;
   wagon_number?: string;
+  wagon_arrival_date?: Date;
   shipping_status?: string;
 };
 type Wagon = {
@@ -26,10 +28,12 @@ export default function AdminHome() {
   const [loading, setLoading] = useState(true);
   const [wagonLoading, setWagonLoading] = useState(true);
 
-  useEffect(() => {
-    fetchOrders();
-    fetchWagons();
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      fetchOrders();
+      fetchWagons();
+    }, [])
+  );
 
   const fetchOrders = async () => {
     try {
@@ -95,7 +99,12 @@ export default function AdminHome() {
   const goToCreateOrder = () => {
     router.push('/(tabs)/(admins)/createOrderManagement');
   };
-
+  const goToCreateWagonOrder = (wagonId: number, wagonNumber: string) => {
+    router.push({
+      pathname: '/(tabs)/(admins)/createWagonOrderManagement' as any,
+      params: { wagonId, wagonNumber },
+    });
+  };
   const goToOrderDetail = (orderId: number) => {
     router.push({
       pathname: '/(tabs)/(admins)/orderManagement' as any,
@@ -115,7 +124,13 @@ export default function AdminHome() {
       <View style={styles.commonCell}><Text style={styles.bodyText}>{order.sender_name || 'null'}</Text></View>
       <View style={styles.commonCell}><Text style={styles.bodyText}>{order.driver_name || 'null'}</Text></View>
       <View style={styles.commonCell}><Text style={styles.bodyText}>{order.wagon_number || 'null'}</Text></View>
-      <View style={styles.commonCell}><Text style={styles.bodyText}>{order.shipping_status || 'null'}</Text></View>
+      <View style={styles.commonCell}>
+        <Text style={styles.bodyText}>
+          {order.shipping_status === 'Đã lên toa'
+            ? `Toa đến ngày: ${order.wagon_arrival_date ? new Date(order.wagon_arrival_date).toLocaleDateString('vi-VN') : 'chưa rõ'}`
+            : order.shipping_status || 'null'}
+        </Text>
+      </View>
       <TouchableOpacity 
         style={[styles.commonCell, styles.lastCell]} 
         onPress={() => goToOrderDetail(order.OrderID)}
@@ -129,7 +144,15 @@ export default function AdminHome() {
     return (
     <View key={wagon.WagonID} style={styles.tableRow}>
       <View style={styles.wagonRowInner}>
-        <Text style={styles.sectionTitle}>Toa {wagon.wagon_number || 'null'}</Text>
+        <View style={styles.wagonRowHeader}>
+          <View style={styles.wagonRowSpacer} />
+          <Text style={styles.sectionTitle}>Toa {wagon.wagon_number || 'null'}</Text>
+          <View style={styles.wagonRowSpacer}>
+            <TouchableOpacity style={styles.addButton} onPress={() => goToCreateWagonOrder(wagon.WagonID, wagon.wagon_number || '')}>
+              <Text style={styles.addButtonText}>Thêm đơn hàng</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
         <View style={styles.tableHeaderWrapper}>
           <View style={styles.tableHeader}>
             <View style={[styles.commonCell, styles.cellLarge]}><Text style={styles.headerText}>Tên hàng</Text></View>
@@ -163,7 +186,13 @@ export default function AdminHome() {
       <View style={styles.commonCell}><Text style={styles.bodyText}>{order.sender_name || 'null'}</Text></View>
       <View style={styles.commonCell}><Text style={styles.bodyText}>{order.driver_name || 'null'}</Text></View>
       <View style={styles.commonCell}><Text style={styles.bodyText}>{order.wagon_number || 'null'}</Text></View>
-      <View style={styles.commonCell}><Text style={styles.bodyText}>{order.shipping_status || 'null'}</Text></View>
+      <View style={styles.commonCell}>
+        <Text style={styles.bodyText}>
+          {order.shipping_status === 'Đã lên toa'
+            ? `Toa đến ngày: ${order.wagon_arrival_date ? new Date(order.wagon_arrival_date).toLocaleDateString('vi-VN') : 'chưa rõ'}`
+            : order.shipping_status || 'null'}
+        </Text>
+      </View>
       <TouchableOpacity 
         style={[styles.commonCell, styles.lastCell]} 
         onPress={() => goToOrderDetail(order.OrderID)}
@@ -318,6 +347,20 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '600',
   },
+  addButtonSmall: {
+    borderWidth: 1,
+    borderColor: '#000',
+    backgroundColor: '#000',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    marginBottom: 6,
+    alignSelf: 'flex-end',
+  },
+  addButtonSmallText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 11,
+  },
   logoutButton: {
     borderWidth: 1,
     borderColor: '#b02a37',
@@ -339,8 +382,8 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontWeight: '600',
     textAlign: 'center',
-    marginBottom: 12,
     marginTop: 5,
+    flex: 1,
   },
   tableHeaderWrapper: {
     overflow: 'hidden',
@@ -452,5 +495,15 @@ const styles = StyleSheet.create({
   },
   wagonRowInner: {
     flex: 1,
+  },
+  wagonRowHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+    marginTop: 8,
+  },
+  wagonRowSpacer: {
+    flex: 1,
+    alignItems: 'flex-end',
   },
 });
