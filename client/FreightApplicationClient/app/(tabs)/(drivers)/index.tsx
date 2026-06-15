@@ -1,93 +1,14 @@
 import React from "react";
-import { View, StyleSheet, Text, TouchableOpacity, ScrollView, Linking } from 'react-native';
-import { Avatar, Button, Divider } from 'react-native-paper';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { View, StyleSheet } from 'react-native';
 import DriverMap from './DriverMap';
 
 export default function DriverHome() {
-  // Hàm xử lý gọi điện
-  const handleCall = () => {
-    Linking.openURL('tel:0908473406');
-  };
+
   return (
     <View style={styles.container}>
-      {/* 1. Phần Map (Giả lập) */}
+      {/* 1. Phần Map */}
       <View style={styles.mapMockup}>
         <DriverMap />
-      </View>
-
-      {/* 2. Phần Thông tin đơn hàng (Bottom Area) */}
-      <View style={styles.orderCard}>
-        
-        {/* Header: Số điểm và Trạng thái */}
-        <View style={styles.headerRow}>
-           <Text style={styles.pointsText}>2 Địa điểm</Text>
-           <View style={styles.statusBadge}>
-              <Text style={styles.statusText}>3 • Giao đơn</Text>
-              <Text style={styles.timeText}>12:15 PM  {'>'}</Text>
-           </View>
-           <MaterialCommunityIcons name="view-list" size={24} color="black" />
-        </View>
-
-        <ScrollView style={styles.content}>
-          {/* Tên khách hàng & Địa chỉ */}
-          <Text style={styles.customerName}>Ngọc Anh Ho</Text>
-          <Text style={styles.addressText}>
-            42 Lý Thường Kiệt, KP.Thắng Lợi 1, P.Dĩ An, TP.Hồ Chí Minh, Vietnam
-          </Text>
-
-          {/* Giá tiền & Hình thức thanh toán */}
-          <View style={styles.priceRow}>
-            <Text style={styles.priceText}>22.762 đ • 40</Text>
-            <View style={styles.paymentMethod}>
-                <Text style={styles.paymentText}>Thẻ / Ví</Text>
-            </View>
-          </View>
-
-          {/* Ghi chú của khách */}
-          <View style={styles.noteBox}>
-            <Text style={styles.noteText}>cuối hẻm quẹo trái, nhà có ghế đá, cửa gỗ</Text>
-          </View>
-        </ScrollView>
-
-        {/* 3. Thanh công cụ (Chat, Gọi, Xem thêm) */}
-        <Divider />
-        <View style={styles.actionRow}>
-          <TouchableOpacity style={styles.actionBtn}>
-            <MaterialCommunityIcons name="silverware-fork-knife" size={24} color="black" />
-            <Text style={styles.actionLabel}>Chi tiết</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.actionBtn}>
-            <MaterialCommunityIcons name="chat-processing" size={24} color="black" />
-            <Text style={styles.actionLabel}>Chat</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.actionBtn} onPress={handleCall}>
-            <MaterialCommunityIcons name="phone" size={24} color="black" />
-            <Text style={styles.actionLabel}>Gọi</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.actionBtn}>
-            <MaterialCommunityIcons name="dots-horizontal-circle-outline" size={24} color="#f57c00" />
-            <Text style={styles.actionLabel}>Xem thêm</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* 4. Nút bấm chính "Đã đến" */}
-        <View style={styles.footer}>
-           <Button 
-            mode="contained" 
-            style={styles.arrivedBtn}
-            labelStyle={styles.btnLabel}
-            onPress={() => console.log('Đã đến điểm giao')}>
-            Đã đến
-          </Button>
-          <TouchableOpacity style={styles.powerBtn}>
-             <MaterialCommunityIcons name="power" size={24} color="white" />
-          </TouchableOpacity>
-        </View>
-
       </View>
     </View>
   );
@@ -95,7 +16,7 @@ export default function DriverHome() {
 }
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  mapMockup: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#e0e0e0' },
+  mapMockup: { flex: 1, backgroundColor: '#e0e0e0' },
   orderCard: { 
     backgroundColor: 'white', 
     borderTopLeftRadius: 20, 
@@ -133,4 +54,5 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
+  
 });

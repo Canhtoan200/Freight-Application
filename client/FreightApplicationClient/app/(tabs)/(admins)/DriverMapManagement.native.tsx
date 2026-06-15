@@ -78,7 +78,7 @@ export default function DriverMapManagement() {
   );
 
   useEffect(() => {
-    fetchDriverDetauls();
+    fetchDriverDetails();
     fetchOrderStatus();
     let isMounted = true;
 
@@ -170,7 +170,7 @@ export default function DriverMapManagement() {
       setLoading(false);
     }
   };
-  const fetchDriverDetauls = async () => {
+  const fetchDriverDetails = async () => {
     try {
       const response = await fetch('https://freight-application-server.onrender.com/api/v1/drivers/getAllDrivers');
       const data = await response.json();
@@ -183,7 +183,7 @@ export default function DriverMapManagement() {
       console.error("Lỗi kết nối", "Không thể kết nối đến máy chủ");
       console.error(error);
     }
-  }
+  };
   const SelectedOrder = async (selectedOrder: Order) => {
     setSelectedOrderID(selectedOrder.OrderID);
     setSelectedOrderCoordinate(null);
@@ -221,16 +221,22 @@ export default function DriverMapManagement() {
       }
     }
   };
-  const renderOrderRow = (order: Order, index: number) => (
+  const renderOrderRow = (order: Order, index: number) => {
+  if (order.shipping_status === "Đã lên toa") {
+    return null; 
+  }
+
+  return (
     <View key={order.OrderID ?? index}>
       <TouchableOpacity onPress={() => SelectedOrder(order)}>
-      <Text style={styles.panelContent} numberOfLines={1}>
-        #{order.OrderID} – {order.organization || order.sender_name || "Khách hàng"} {"\n"}
-      </Text>
-      <View style={styles.divider} />
+        <Text style={styles.panelContent} numberOfLines={1}>
+          #{order.OrderID} – {order.organization || order.sender_name || "Khách hàng"} {"\n"}
+        </Text>
+        <View style={styles.divider} />
       </TouchableOpacity>
     </View>
   );
+  };
   const SelectedDriver = async (driver: Driver) => {
     setSelectedDriverID(driver.DriverIDs);
     setSelectedDriverCoordinate(null);
@@ -694,7 +700,8 @@ const styles = StyleSheet.create({
     height: 40,
     alignItems: 'center',
     justifyContent: 'center',
-  },  fullscreenLoader: {
+  },  
+  fullscreenLoader: {
     position: "absolute",
     top: 0,
     left: 0,

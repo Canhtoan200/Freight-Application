@@ -1,11 +1,43 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import Constants from 'expo-constants';
 import * as Location from 'expo-location';
+import React, { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+type Order = {
+  OrderID: number;
+  order_name?: string;
+  goods_quantity?: number;
+  receiver_name?: string;
+  sender_name?: string;
+  sender_address?: string;
+  driver_name?: string;
+  wagon_number?: string;
+  shipping_status?: string;
+  goods_weight?: string;
+  goods_volumn?: string;
+  organization?: string;
+};
+type Driver = {
+  DriverIDs: number;
+  driver_name?: string;
+  driver_link?: string;
+  driver_license_plate_number?: string;
+  driver_phone_number?: string;
+  amount_of_gas?: number;
+  money_amount_of_gas?: number;
+  the_remaining_volume_of_the_car?: number;
+  the_remaining_weight_of_the_car?: number;
+  drop_off_distance?: number;
+};
 
 const MAPBOX_ACCESS_TOKEN = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN ?? '';
 const MAPBOX_STYLE_URL = 'mapbox://styles/mapbox/streets-v12';
-const IS_EXPO_GO = Constants.appOwnership === 'expo' || Constants.executionEnvironment === 'storeClient';
+const IS_EXPO_GO =
+  Constants.appOwnership === 'expo' ||
+  Constants.executionEnvironment === 'storeClient';
 const Mapbox = (() => {
   try {
     const module = require('@rnmapbox/maps');
@@ -15,30 +47,43 @@ const Mapbox = (() => {
   }
 })() as any | null;
 
+if (Mapbox && MAPBOX_ACCESS_TOKEN) {
+  Mapbox.setAccessToken(MAPBOX_ACCESS_TOKEN);
+}
+
 const INITIAL_LOCATION = {
   latitude: 10.7769,
   longitude: 106.7009,
   zoomLevel: 14,
 };
 
-if (Mapbox && MAPBOX_ACCESS_TOKEN) {
-  Mapbox.setAccessToken(MAPBOX_ACCESS_TOKEN);
-}
+type Props = {
+  destinationAddress?: string;
+};
 
-export default function DriverMap() {
+export default function DriverMap({ destinationAddress }: Props) {
   const cameraRef = useRef<any>(null);
   const [currentLocation, setCurrentLocation] = useState(INITIAL_LOCATION);
   const [loading, setLoading] = useState(true);
+  const [destinationCoordinate, setDestinationCoordinate] = useState<[number, number] | null>(null);
+  const [routeCoordinates, setRouteCoordinates] = useState<[number, number][] | null>(null);
   const canUseMapbox = Boolean(Mapbox && MAPBOX_ACCESS_TOKEN && !IS_EXPO_GO);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [drivers, setDrivers] = useState<Driver>();
+  const insets = useSafeAreaInsets();
+  const [selectedOrderID, setSelectedOrderID] = useState<number | null>(null);
+  const [selectedOrderCoordinate, setSelectedOrderCoordinate] = useState<[number, number] | null>(null);
+  const [selectedDriverCoordinate, setSelectedDriverCoordinate] = useState<[number, number] | null>(null);
   const [errorMessage, setErrorMessage] = useState(
     IS_EXPO_GO
       ? 'Mapbox cần Development Build và không chạy trực tiếp trong Expo Go.'
       : MAPBOX_ACCESS_TOKEN
         ? ''
-        : 'Thiếu EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN để hiển thị bản đồ Mapbox.'
+        : 'Thiếu EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN để hiển thị bản đồ Mapbox.',
   );
 
   useEffect(() => {
+    fetchOrdersByUserID(); 
     let isMounted = true;
 
     const getCurrentLocation = async () => {
@@ -51,9 +96,7 @@ export default function DriverMap() {
         const { status } = await Location.requestForegroundPermissionsAsync();
 
         if (status !== 'granted') {
-          if (isMounted) {
-            setErrorMessage('Bạn chưa cấp quyền vị trí cho ứng dụng.');
-          }
+          if (isMounted) setErrorMessage('Bạn chưa cấp quyền vị trí cho ứng dụng.');
           return;
         }
 
@@ -61,67 +104,326 @@ export default function DriverMap() {
           accuracy: Location.Accuracy.High,
         });
 
-        const nextLocation = {
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-          zoomLevel: 15,
-        };
-
         if (isMounted) {
+          const nextLocation = {
+            latitude: location.coords.latitude,
+            longitude: location.coords.longitude,
+            zoomLevel: 15,
+          };
           setCurrentLocation(nextLocation);
-          cameraRef.current?.flyTo([nextLocation.longitude, nextLocation.latitude], 1000);
+          cameraRef.current?.setCamera({
+            centerCoordinate: [nextLocation.longitude, nextLocation.latitude],
+            zoomLevel: 15,
+            animationDuration: 1000,
+          });
         }
       } catch (error) {
         console.error('Lỗi lấy vị trí hiện tại:', error);
-        if (isMounted) {
-          setErrorMessage('Không thể lấy vị trí hiện tại.');
-        }
+        if (isMounted) setErrorMessage('Không thể lấy vị trí hiện tại.');
       } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
+        if (isMounted) setLoading(false);
       }
     };
 
     getCurrentLocation();
-
-    return () => {
-      isMounted = false;
-    };
+    return () => { isMounted = false; };
   }, [canUseMapbox]);
 
+  useEffect(() => {
+    if (!destinationAddress || !currentLocation) return;
+    (async () => {
+      const features = await searchAddress(destinationAddress);
+      if (features && features.length > 0) {
+        const [lng, lat] = features[0].geometry.coordinates;
+        setDestinationCoordinate([lng, lat]);
+      }
+    })();
+  }, [destinationAddress, currentLocation]);
+
+  useEffect(() => {
+    if (currentLocation && destinationCoordinate) {
+      const from: [number, number] = [currentLocation.longitude, currentLocation.latitude];
+      fetchRoute(from, destinationCoordinate);
+    } else {
+      setRouteCoordinates(null);
+    }
+  }, [currentLocation, destinationCoordinate]);
+
+  const fetchOrdersByUserID = async () => {
+    try {
+      const raw = await AsyncStorage.getItem('userToken');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const getDriverID = await fetchDriverID(parsed.userID);
+        const getDriver = await fetchDriverByDriverID(getDriverID);
+        const getDriverOrderID = await fetchDriverOrderID(getDriverID);
+        const fetchedOrders: Order[] = [];
+        for(let i = 0; i < getDriverOrderID.length; i++) {
+          const getOrderID = await fetchOrderID(getDriverOrderID[i]);
+          fetchedOrders.push(getOrderID);
+        }
+        setOrders(fetchedOrders);
+      }
+    } catch (error) {
+      console.error('Lỗi đọc userID:', error);
+    }
+  };
+
+  const fetchDriverID = async (userID: number) => {
+    try {
+      const getDriverID = await fetch('https://freight-application-server.onrender.com/api/v1/drivers/getDriverIDBasedOnUserID?userID=' + userID);
+      const data = await getDriverID.json();
+      if (getDriverID.ok) {
+        return data.data;
+      } else {
+        console.log("Lỗi", "Không thể tải danh sách tài xế");
+      }
+    } catch (error) {
+      console.error("Lỗi kết nối", "Không thể kết nối đến máy chủ");
+      console.error(error);
+    }
+  };
+  const fetchDriverByDriverID = async (driverID: number) => {
+    try {
+      const getDriver = await fetch('https://freight-application-server.onrender.com/api/v1/drivers/getDriverByDriverID?driverID=' + driverID);
+      const data = await getDriver.json();
+      if (getDriver.ok) {
+        setDrivers(data.data);
+        return data.data;
+      } else {
+        console.log("Lỗi", "Không thể tải thông tin tài xế");
+      }
+    } catch (error) {
+      console.error("Lỗi kết nối", "Không thể kết nối đến máy chủ");
+      console.error(error);
+    }
+  };
+  const fetchDriverOrderID = async (driverID: number) => {
+    try {
+      const getDriverOrderID = await fetch('https://freight-application-server.onrender.com/api/v1/drivers/getDriverOrderBasedOnDriverID?driverID=' + driverID);
+      const data = await getDriverOrderID.json();
+      if (getDriverOrderID.ok) {
+        return data.data.map((item: any) => item.OrderIDs);
+      } else {
+        console.log("Lỗi", "Không thể tải danh sách tài xế");
+      }
+    } catch (error) {
+      console.error("Lỗi kết nối", "Không thể kết nối đến máy chủ");
+      console.error(error);
+    }
+  };
+  const fetchOrderID = async (orderID: number) => {
+    try {
+      const getOrderID = await fetch('https://freight-application-server.onrender.com/api/v1/orders/getOrderByID?OrderID=' + orderID);
+      const data = await getOrderID.json();
+      if (getOrderID.ok) {
+        return data.data;
+      } else {
+        console.log("Lỗi", "Không thể tải danh sách đơn hàng");
+      }
+    } catch (error) {
+      console.error("Lỗi kết nối", "Không thể kết nối đến máy chủ");
+      console.error(error);
+    }
+  };
+  const renderOrderRow = (order: Order, index: number) => {
+    if (order.shipping_status === "Đã lên toa") {
+      return null; 
+    }
+  
+    return (
+      <View key={order.OrderID ?? index}>
+        <TouchableOpacity onPress={() => SelectedOrder(order)}>
+          <Text style={styles.panelContent} numberOfLines={1}>
+            #{order.OrderID} – {order.organization || order.sender_name || "Khách hàng"} {"\n"}
+          </Text>
+          <View style={styles.divider} />
+        </TouchableOpacity>
+      </View>
+    );
+  };
+  const SelectedOrder = async (selectedOrder: Order) => {
+    setSelectedOrderID(selectedOrder.OrderID);
+    setSelectedOrderCoordinate(null);
+    setSelectedDriverCoordinate(null);
+
+    // Geocode sender address
+    const orderFeatures = await searchAddress(selectedOrder.sender_address ?? '');
+    if (orderFeatures && orderFeatures.length > 0) {
+      const [longitude, latitude] = orderFeatures[0].geometry.coordinates;
+      const coord: [number, number] = [longitude, latitude];
+      setSelectedOrderCoordinate(coord);
+      const driverFeatures = await searchAddress(drivers?.driver_link ?? '');
+      if (driverFeatures && driverFeatures.length > 0) {
+        const [driverLng, driverLat] = driverFeatures[0].geometry.coordinates;
+        const driverCoord: [number, number] = [driverLng, driverLat];
+        setSelectedDriverCoordinate(driverCoord);
+        fetchRoute(driverCoord, coord);
+      }
+      if (cameraRef.current) {
+        cameraRef.current.setCamera({
+          centerCoordinate: coord,
+          zoomLevel: 15,
+          animationDuration: 1000,
+        });
+      }
+    }
+  };
+
+  const searchAddress = async (address: string) => {
+    const GOONG_API_KEY = process.env.EXPO_PUBLIC_GOONG_API_KEY;
+    const url = `https://rsapi.goong.io/Geocode?address=${encodeURIComponent(address)}&api_key=${GOONG_API_KEY}`;
+    try {
+      const response = await fetch(url);
+      const data = await response.json();
+      if (data.results && data.results.length > 0) {
+        const { lat, lng } = data.results[0].geometry.location;
+        return [{ geometry: { type: 'Point', coordinates: [lng, lat] } }];
+      }
+      return [];
+    } catch {
+      return [];
+    }
+  };
+
+  const fetchRoute = async (from: [number, number], to: [number, number]) => {
+    const token = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN;
+    const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${from[0]},${from[1]};${to[0]},${to[1]}?geometries=geojson&overview=full&access_token=${token}`;
+    try {
+      const response = await fetch(url);
+      const data = await response.json();
+      if (data.routes && data.routes.length > 0) {
+        setRouteCoordinates(data.routes[0].geometry.coordinates);
+        if (cameraRef.current) {
+          const lngs = [from[0], to[0]];
+          const lats = [from[1], to[1]];
+          cameraRef.current.fitBounds(
+            [Math.max(...lngs), Math.max(...lats)],
+            [Math.min(...lngs), Math.min(...lats)],
+            [80, 80, 80, 80],
+            1000,
+          );
+        }
+      } else {
+        setRouteCoordinates(null);
+      }
+    } catch (error) {
+      console.error('Lỗi lấy tuyến đường:', error);
+      setRouteCoordinates(null);
+    }
+  };
+
   const centerCoordinate = [currentLocation.longitude, currentLocation.latitude] as [number, number];
+
+  const centerMapOnUser = () => {
+    if (cameraRef.current && centerCoordinate) {
+      cameraRef.current.setCamera({
+        centerCoordinate,
+        zoomLevel: 15,
+        animationDuration: 1000,
+      });
+    }
+  };
 
   return (
     <View style={styles.container}>
       {canUseMapbox ? (
-        <Mapbox.MapView
-          style={styles.map}
-          styleURL={MAPBOX_STYLE_URL}
-          compassEnabled={true}
-          logoEnabled={true}
-          scaleBarEnabled={true}
-          onMapLoadingError={() => setErrorMessage('Mapbox không thể tải dữ liệu bản đồ.')}
-        >
-          <Mapbox.Camera
-            ref={cameraRef}
-            centerCoordinate={centerCoordinate}
-            zoomLevel={currentLocation.zoomLevel}
-            animationMode="flyTo"
-            animationDuration={1000}
-          />
-
-          <Mapbox.PointAnnotation
-            id="current-location-driver"
-            coordinate={centerCoordinate}
-            title="Vị trí của bạn"
-            snippet="Ứng dụng đang hiển thị vị trí hiện tại"
+        <>
+          <Mapbox.MapView
+            style={styles.map}
+            styleURL={MAPBOX_STYLE_URL}
+            onMapLoadingError={() => setErrorMessage('Mapbox không thể tải dữ liệu bản đồ.')}
           >
-            <View style={styles.marker}>
-              <View style={styles.markerDot} />
-            </View>
-          </Mapbox.PointAnnotation>
-        </Mapbox.MapView>
+            <Mapbox.Camera
+              ref={cameraRef}
+              centerCoordinate={centerCoordinate}
+              zoomLevel={currentLocation.zoomLevel}
+              animationMode="none"
+            />
+
+            <Mapbox.PointAnnotation
+              id="current-location-driver"
+              coordinate={centerCoordinate}
+              title="Vị trí của bạn"
+            >
+              <View style={styles.marker} />
+            </Mapbox.PointAnnotation>
+            
+            {selectedOrderCoordinate && (
+              <Mapbox.PointAnnotation
+                id="selected-order-location"
+                coordinate={selectedOrderCoordinate}
+              >
+                <View style={styles.orderMarker}>
+                  <Ionicons name="location" size={28} color="#dc2626" />
+                </View>
+                <Mapbox.Callout title="Địa chỉ gửi hàng" />
+              </Mapbox.PointAnnotation>
+            )}
+            {selectedDriverCoordinate && (
+              <Mapbox.PointAnnotation
+                id="selected-driver-location"
+                coordinate={selectedDriverCoordinate}
+              >
+                <View style={styles.driverMarker}>
+                  <Ionicons name="car-sport" size={24} color="black" />
+                </View>
+                <Mapbox.Callout title="Vị trí tài xế" />
+              </Mapbox.PointAnnotation>
+            )}
+            {routeCoordinates && (
+              <Mapbox.ShapeSource
+                id="route-source"
+                shape={{
+                  type: 'Feature',
+                  properties: {},
+                  geometry: { type: 'LineString', coordinates: routeCoordinates },
+                }}
+              >
+                <Mapbox.LineLayer
+                  id="route-layer"
+                  style={{
+                    lineColor: '#2563eb',
+                    lineWidth: 4,
+                    lineOpacity: 0.85,
+                    lineCap: 'round',
+                    lineJoin: 'round',
+                  }}
+                />
+              </Mapbox.ShapeSource>
+            )}
+
+            {destinationCoordinate && (
+              <Mapbox.PointAnnotation
+                id="destination-location"
+                coordinate={destinationCoordinate}
+              >
+                <View style={styles.destinationMarker}>
+                  <Ionicons name="location" size={28} color="#dc2626" />
+                </View>
+                <Mapbox.Callout title="Địa chỉ giao hàng" />
+              </Mapbox.PointAnnotation>
+            )}
+
+          </Mapbox.MapView>
+          <View style={[styles.topRightPanel, { top: insets.top - 30 }]}>
+            <Text style={styles.panelTitle}>Danh sách các đơn hàng cần đi hôm nay:</Text>
+            {loading ? (
+              <Text style={styles.emptyText}>Đang tải...</Text>
+            ) : orders.length > 0 ? (
+              orders.map(renderOrderRow)
+            ) : (
+              <Text style={styles.emptyText}>Chưa có đơn hàng đang vận chuyển</Text>
+            )}
+          </View>
+          <TouchableOpacity
+            style={styles.locationButton}
+            onPress={centerMapOnUser}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="locate" size={24} color="#2563eb" />
+          </TouchableOpacity>
+        </>
       ) : (
         <View style={styles.missingTokenContainer}>
           <Text style={styles.missingTokenTitle}>
@@ -136,9 +438,9 @@ export default function DriverMap() {
       )}
 
       {loading && (
-        <View style={styles.overlay}>
-          <ActivityIndicator size="large" color="#000" />
-          <Text style={styles.overlayText}>Đang lấy vị trí hiện tại...</Text>
+        <View style={styles.loadingBadge}>
+          <ActivityIndicator size="small" color="#2563eb" />
+          <Text style={styles.loadingText}>Đang định vị...</Text>
         </View>
       )}
 
@@ -184,28 +486,47 @@ const styles = StyleSheet.create({
     backgroundColor: '#2563eb',
     borderWidth: 3,
     borderColor: '#fff',
+  },
+  destinationMarker: {
     alignItems: 'center',
     justifyContent: 'center',
   },
-  markerDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+  locationButton: {
+    position: 'absolute',
+    bottom: 20,
+    right: 20,
     backgroundColor: '#fff',
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
   },
-  overlay: {
+  loadingBadge: {
     position: 'absolute',
     top: 16,
     left: 16,
-    right: 16,
-    backgroundColor: 'rgba(255,255,255,0.95)',
-    padding: 12,
-    borderRadius: 10,
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
   },
-  overlayText: {
-    marginTop: 8,
-    color: '#111',
+  loadingText: {
+    fontSize: 12,
+    color: '#2563eb',
     fontWeight: '600',
   },
   banner: {
@@ -221,5 +542,52 @@ const styles = StyleSheet.create({
     color: '#fff',
     textAlign: 'center',
     fontWeight: '600',
+  },
+  panelContent: {
+    fontSize: 12,
+    color: '#64748b',
+    fontFamily: 'System',
+  },
+  divider: {
+    height: 1,
+    backgroundColor: '#e2e8f0',
+    marginVertical: 6,
+  },
+  topRightPanel: {
+    position: 'absolute',
+    right: 15,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)', // Slightly transparent
+    padding: 12,
+    borderRadius: 12,
+    width: 200,
+    // Shadow/Elevation
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    zIndex: 10,
+  },
+  panelTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1e293b',
+    marginBottom: 4,
+  },
+  emptyText: {
+    fontSize: 12,
+    color: '#94a3b8',
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  driverMarker: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },  
+  orderMarker: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
