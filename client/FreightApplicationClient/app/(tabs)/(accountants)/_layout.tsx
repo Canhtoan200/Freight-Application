@@ -21,9 +21,27 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Trang chủ',
+          title: 'Tổng hợp nhật kí',
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? 'home-sharp' : 'home-outline'} color={color} size={24} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="liability"
+        options={{
+          title: 'Công nợ',
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'cash-sharp' : 'cash-outline'} color={color} size={24} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="driverManagement"
+        options={{
+          title: 'Quản lý tài xế',
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'car-sharp' : 'car-outline'} color={color} size={24} />
           ),
         }}
       />
