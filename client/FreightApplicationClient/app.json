@@ -26,13 +26,18 @@
         "android.permission.ACCESS_FINE_LOCATION"
       ],
       "package": "com.anonymous.FreightApplicationClient"
+    ,
+      "config": {
+        "googleMaps": {
+          "apiKey": "PMor1h7L82tghzCo91QQw60zpBrbYNP2ZapzDdIQ"
+        }
+      }
     },
     "web": {
       "output": "static",
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
-      "@rnmapbox/maps",
       [
         "expo-location",
         {
@@ -58,12 +63,7 @@
           }
         }
       ],
-      [
-        "@rnmapbox/maps",
-        {
-          "RNMapboxMapsImpl": "mapbox"
-        }
-      ],
+      
       "@react-native-community/datetimepicker"
     ],
     "experiments": {

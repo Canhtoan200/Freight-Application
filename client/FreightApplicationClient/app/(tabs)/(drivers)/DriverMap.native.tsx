@@ -2,7 +2,8 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import Constants from 'expo-constants';
 import * as Location from 'expo-location';
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View, Platform } from 'react-native';
+import MapView, { Marker, Polyline, UrlTile, PROVIDER_GOOGLE } from 'react-native-maps';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -33,23 +34,12 @@ type Driver = {
   drop_off_distance?: number;
 };
 
-const MAPBOX_ACCESS_TOKEN = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN ?? '';
-const MAPBOX_STYLE_URL = 'mapbox://styles/mapbox/streets-v12';
 const IS_EXPO_GO =
   Constants.appOwnership === 'expo' ||
   Constants.executionEnvironment === 'storeClient';
-const Mapbox = (() => {
-  try {
-    const module = require('@rnmapbox/maps');
-    return module.default ?? module;
-  } catch {
-    return null;
-  }
-})() as any | null;
 
-if (Mapbox && MAPBOX_ACCESS_TOKEN) {
-  Mapbox.setAccessToken(MAPBOX_ACCESS_TOKEN);
-}
+const GOONG_MAPTILES_KEY = process.env.EXPO_PUBLIC_GOONG_MAPTILES_KEY ?? '';
+const GOONG_API_KEY = process.env.EXPO_PUBLIC_GOONG_API_KEY ?? '';
 
 const INITIAL_LOCATION = {
   latitude: 10.7769,
@@ -62,12 +52,12 @@ type Props = {
 };
 
 export default function DriverMap({ destinationAddress }: Props) {
-  const cameraRef = useRef<any>(null);
+  const mapRef = useRef<MapView | null>(null);
   const [currentLocation, setCurrentLocation] = useState(INITIAL_LOCATION);
   const [loading, setLoading] = useState(true);
   const [destinationCoordinate, setDestinationCoordinate] = useState<[number, number] | null>(null);
   const [routeCoordinates, setRouteCoordinates] = useState<[number, number][] | null>(null);
-  const canUseMapbox = Boolean(Mapbox && MAPBOX_ACCESS_TOKEN && !IS_EXPO_GO);
+  const canUseGoong = Boolean(GOONG_MAPTILES_KEY && GOONG_API_KEY && !IS_EXPO_GO);
   const [orders, setOrders] = useState<Order[]>([]);
   const [drivers, setDrivers] = useState<Driver>();
   const insets = useSafeAreaInsets();
@@ -76,10 +66,12 @@ export default function DriverMap({ destinationAddress }: Props) {
   const [selectedDriverCoordinate, setSelectedDriverCoordinate] = useState<[number, number] | null>(null);
   const [errorMessage, setErrorMessage] = useState(
     IS_EXPO_GO
-      ? 'Mapbox cần Development Build và không chạy trực tiếp trong Expo Go.'
-      : MAPBOX_ACCESS_TOKEN
+      ? 'Goong map cần Development Build và không chạy trực tiếp trong Expo Go.'
+      : GOONG_MAPTILES_KEY && GOONG_API_KEY
         ? ''
-        : 'Thiếu EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN để hiển thị bản đồ Mapbox.',
+        : !GOONG_MAPTILES_KEY
+          ? 'Thiếu EXPO_PUBLIC_GOONG_MAPTILES_KEY để hiển thị bản đồ Goong.'
+          : 'Thiếu EXPO_PUBLIC_GOONG_API_KEY để gọi API Goong.',
   );
 
   useEffect(() => {
@@ -87,7 +79,7 @@ export default function DriverMap({ destinationAddress }: Props) {
     let isMounted = true;
 
     const getCurrentLocation = async () => {
-      if (!canUseMapbox) {
+      if (!canUseGoong) {
         setLoading(false);
         return;
       }
@@ -111,11 +103,12 @@ export default function DriverMap({ destinationAddress }: Props) {
             zoomLevel: 15,
           };
           setCurrentLocation(nextLocation);
-          cameraRef.current?.setCamera({
-            centerCoordinate: [nextLocation.longitude, nextLocation.latitude],
-            zoomLevel: 15,
-            animationDuration: 1000,
-          });
+          mapRef.current?.animateToRegion({
+            latitude: nextLocation.latitude,
+            longitude: nextLocation.longitude,
+            latitudeDelta: 0.01,
+            longitudeDelta: 0.01,
+          }, 1000);
         }
       } catch (error) {
         console.error('Lỗi lấy vị trí hiện tại:', error);
@@ -127,7 +120,7 @@ export default function DriverMap({ destinationAddress }: Props) {
 
     getCurrentLocation();
     return () => { isMounted = false; };
-  }, [canUseMapbox]);
+  }, [canUseGoong]);
 
   useEffect(() => {
     if (!destinationAddress || !currentLocation) return;
@@ -260,18 +253,19 @@ export default function DriverMap({ destinationAddress }: Props) {
         setSelectedDriverCoordinate(driverCoord);
         fetchRoute(driverCoord, coord);
       }
-      if (cameraRef.current) {
-        cameraRef.current.setCamera({
-          centerCoordinate: coord,
-          zoomLevel: 15,
-          animationDuration: 1000,
-        });
+      if (mapRef.current) {
+        mapRef.current.animateToRegion({
+          latitude: coord[1],
+          longitude: coord[0],
+          latitudeDelta: 0.01,
+          longitudeDelta: 0.01,
+        }, 1000);
       }
     }
   };
 
   const searchAddress = async (address: string) => {
-    const GOONG_API_KEY = process.env.EXPO_PUBLIC_GOONG_API_KEY;
+    if (!address) return [];
     const url = `https://rsapi.goong.io/Geocode?address=${encodeURIComponent(address)}&api_key=${GOONG_API_KEY}`;
     try {
       const response = await fetch(url);
@@ -281,28 +275,28 @@ export default function DriverMap({ destinationAddress }: Props) {
         return [{ geometry: { type: 'Point', coordinates: [lng, lat] } }];
       }
       return [];
-    } catch {
+    } catch (e) {
+      console.error('Geocode error', e);
       return [];
     }
   };
 
   const fetchRoute = async (from: [number, number], to: [number, number]) => {
-    const token = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN;
-    const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${from[0]},${from[1]};${to[0]},${to[1]}?geometries=geojson&overview=full&access_token=${token}`;
+    const url = `https://rsapi.goong.io/direction?origin=${from[1]},${from[0]}&destination=${to[1]},${to[0]}&vehicle=car&api_key=${GOONG_API_KEY}`;
     try {
       const response = await fetch(url);
       const data = await response.json();
       if (data.routes && data.routes.length > 0) {
-        setRouteCoordinates(data.routes[0].geometry.coordinates);
-        if (cameraRef.current) {
-          const lngs = [from[0], to[0]];
-          const lats = [from[1], to[1]];
-          cameraRef.current.fitBounds(
-            [Math.max(...lngs), Math.max(...lats)],
-            [Math.min(...lngs), Math.min(...lats)],
-            [80, 80, 80, 80],
-            1000,
-          );
+        const route = data.routes[0];
+        if (route.geometry && route.geometry.coordinates) {
+          setRouteCoordinates(route.geometry.coordinates);
+          // Fit map to route
+          if (mapRef.current) {
+            const coords = route.geometry.coordinates.map((c: any) => ({ latitude: c[1], longitude: c[0] }));
+            mapRef.current.fitToCoordinates(coords, { edgePadding: { top: 80, right: 80, bottom: 80, left: 80 }, animated: true });
+          }
+        } else {
+          setRouteCoordinates(null);
         }
       } else {
         setRouteCoordinates(null);
@@ -327,85 +321,59 @@ export default function DriverMap({ destinationAddress }: Props) {
 
   return (
     <View style={styles.container}>
-      {canUseMapbox ? (
+      {canUseGoong ? (
         <>
-          <Mapbox.MapView
+          <MapView
+            ref={(r) => (mapRef.current = r)}
             style={styles.map}
-            styleURL={MAPBOX_STYLE_URL}
-            onMapLoadingError={() => setErrorMessage('Mapbox không thể tải dữ liệu bản đồ.')}
+            provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
+            initialRegion={{
+              latitude: currentLocation.latitude,
+              longitude: currentLocation.longitude,
+              latitudeDelta: 0.01,
+              longitudeDelta: 0.01,
+            }}
+            showsUserLocation={true}
+            showsMyLocationButton={false}
           >
-            <Mapbox.Camera
-              ref={cameraRef}
-              centerCoordinate={centerCoordinate}
-              zoomLevel={currentLocation.zoomLevel}
-              animationMode="none"
-            />
+            {GOONG_MAPTILES_KEY ? (
+              <UrlTile urlTemplate={`https://tile.goong.io/1.0.0/{z}/{x}/{y}.png?api_key=${GOONG_MAPTILES_KEY}`} maximumZ={20} flipY={false} />
+            ) : null}
 
-            <Mapbox.PointAnnotation
-              id="current-location-driver"
-              coordinate={centerCoordinate}
-              title="Vị trí của bạn"
-            >
+            <Marker coordinate={{ latitude: currentLocation.latitude, longitude: currentLocation.longitude }}>
               <View style={styles.marker} />
-            </Mapbox.PointAnnotation>
-            
+            </Marker>
+
             {selectedOrderCoordinate && (
-              <Mapbox.PointAnnotation
-                id="selected-order-location"
-                coordinate={selectedOrderCoordinate}
-              >
+              <Marker coordinate={{ latitude: selectedOrderCoordinate[1], longitude: selectedOrderCoordinate[0] }}>
                 <View style={styles.orderMarker}>
                   <Ionicons name="location" size={28} color="#dc2626" />
                 </View>
-                <Mapbox.Callout title="Địa chỉ gửi hàng" />
-              </Mapbox.PointAnnotation>
+              </Marker>
             )}
+
             {selectedDriverCoordinate && (
-              <Mapbox.PointAnnotation
-                id="selected-driver-location"
-                coordinate={selectedDriverCoordinate}
-              >
+              <Marker coordinate={{ latitude: selectedDriverCoordinate[1], longitude: selectedDriverCoordinate[0] }}>
                 <View style={styles.driverMarker}>
                   <Ionicons name="car-sport" size={24} color="black" />
                 </View>
-                <Mapbox.Callout title="Vị trí tài xế" />
-              </Mapbox.PointAnnotation>
+              </Marker>
             )}
+
             {routeCoordinates && (
-              <Mapbox.ShapeSource
-                id="route-source"
-                shape={{
-                  type: 'Feature',
-                  properties: {},
-                  geometry: { type: 'LineString', coordinates: routeCoordinates },
-                }}
-              >
-                <Mapbox.LineLayer
-                  id="route-layer"
-                  style={{
-                    lineColor: '#2563eb',
-                    lineWidth: 4,
-                    lineOpacity: 0.85,
-                    lineCap: 'round',
-                    lineJoin: 'round',
-                  }}
-                />
-              </Mapbox.ShapeSource>
+              <Polyline coordinates={routeCoordinates.map((c) => ({ latitude: c[1], longitude: c[0] }))} strokeColor="#2563eb" strokeWidth={4} />
             )}
 
             {destinationCoordinate && (
-              <Mapbox.PointAnnotation
-                id="destination-location"
-                coordinate={destinationCoordinate}
-              >
+              <Marker coordinate={{ latitude: destinationCoordinate[1], longitude: destinationCoordinate[0] }}>
                 <View style={styles.destinationMarker}>
                   <Ionicons name="location" size={28} color="#dc2626" />
                 </View>
-                <Mapbox.Callout title="Địa chỉ giao hàng" />
-              </Mapbox.PointAnnotation>
+              </Marker>
             )}
 
-          </Mapbox.MapView>
+          </MapView>
+
           <View style={[styles.topRightPanel, { top: insets.top - 30 }]}>
             <Text style={styles.panelTitle}>Danh sách các đơn hàng cần đi hôm nay:</Text>
             {loading ? (
@@ -416,23 +384,19 @@ export default function DriverMap({ destinationAddress }: Props) {
               <Text style={styles.emptyText}>Chưa có đơn hàng đang vận chuyển</Text>
             )}
           </View>
-          <TouchableOpacity
-            style={styles.locationButton}
-            onPress={centerMapOnUser}
-            activeOpacity={0.7}
-          >
+          <TouchableOpacity style={styles.locationButton} onPress={centerMapOnUser} activeOpacity={0.7}>
             <Ionicons name="locate" size={24} color="#2563eb" />
           </TouchableOpacity>
         </>
       ) : (
         <View style={styles.missingTokenContainer}>
           <Text style={styles.missingTokenTitle}>
-            {IS_EXPO_GO ? 'Mapbox cần Development Build' : 'Mapbox chưa được cấu hình'}
+            {IS_EXPO_GO ? 'Goong map cần Development Build' : 'Goong map chưa được cấu hình'}
           </Text>
           <Text style={styles.missingTokenText}>
             {IS_EXPO_GO
-              ? 'Bạn đang mở ứng dụng bằng Expo Go. Hãy dùng development build để hiển thị Mapbox.'
-              : 'Thêm EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN vào môi trường để hiển thị bản đồ.'}
+              ? 'Bạn đang mở ứng dụng bằng Expo Go. Hãy dùng development build để hiển thị Goong map.'
+              : 'Thêm EXPO_PUBLIC_GOONG_MAPTILES_KEY vào môi trường để hiển thị bản đồ.'}
           </Text>
         </View>
       )}
