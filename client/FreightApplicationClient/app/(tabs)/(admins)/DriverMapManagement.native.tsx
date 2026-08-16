@@ -69,6 +69,25 @@ type RouteResult = {
   durationText?: string;
 };
 
+type TrackingStatus = 'Đã phân công' | 'Tài xế đang đến điểm lấy' | 'Đã đến điểm lấy';
+
+type TrackingSession = {
+  order: Order;
+  driver: Driver;
+  route: RouteResult;
+  currentCoordinate: Coordinate;
+  status: TrackingStatus;
+  progress: number;
+  remainingDistanceMeters: number;
+  etaSeconds: number;
+};
+
+type RouteMetrics = {
+  coordinates: Coordinate[];
+  cumulativeDistances: number[];
+  totalDistanceMeters: number;
+};
+
 type OrdersPanelProps = {
   loading: boolean;
   orders: Order[];
@@ -92,11 +111,18 @@ type DriverSelectPanelProps = {
   onClose: () => void;
 };
 
+type TrackingPanelProps = {
+  session: TrackingSession;
+  onClose: () => void;
+};
+
 const SERVER_URL = 'https://freight-application-server.onrender.com/api/v1';
 const GOONG_MAPTILES_KEY = process.env.EXPO_PUBLIC_GOONG_MAPTILES_KEY ?? '';
 const GOONG_API_KEY = process.env.EXPO_PUBLIC_GOONG_API_KEY ?? '';
 const GOONG_STYLE_URL = `https://tiles.goong.io/assets/goong_map_web.json?api_key=${encodeURIComponent(GOONG_MAPTILES_KEY)}`;
 const DEFAULT_COORDINATE: Coordinate = [106.7009, 10.7769];
+const SIMULATION_DURATION_MS = 45_000;
+const SIMULATION_TICK_MS = 500;
 const IS_EXPO_GO =
   Constants.appOwnership === 'expo' ||
   Constants.executionEnvironment === 'storeClient';
@@ -189,6 +215,7 @@ export default function DriverMapManagement() {
   const geocodeCacheRef = useRef(new globalThis.Map<string, Coordinate>());
   const orderRequestRef = useRef(0);
   const driverRequestRef = useRef(0);
+  const trackingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
@@ -198,6 +225,7 @@ export default function DriverMapManagement() {
   const [driverCoordinate, setDriverCoordinate] = useState<Coordinate | null>(null);
   const [currentCoordinate, setCurrentCoordinate] = useState<Coordinate>(DEFAULT_COORDINATE);
   const [route, setRoute] = useState<RouteResult | null>(null);
+  const [trackingSession, setTrackingSession] = useState<TrackingSession | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [loadingData, setLoadingData] = useState(true);
   const [geocoding, setGeocoding] = useState(false);
@@ -207,6 +235,12 @@ export default function DriverMapManagement() {
   const [errorMessage, setErrorMessage] = useState('');
 
   const canRenderMap = Boolean(GOONG_MAPTILES_KEY && !IS_EXPO_GO);
+
+  useEffect(() => {
+    return () => {
+      if (trackingTimerRef.current) clearInterval(trackingTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -380,8 +414,55 @@ export default function DriverMapManagement() {
     }
   };
 
+  const stopTrackingTimer = () => {
+    if (!trackingTimerRef.current) return;
+    clearInterval(trackingTimerRef.current);
+    trackingTimerRef.current = null;
+  };
+
+  const startMockTracking = (order: Order, driver: Driver, assignedRoute: RouteResult) => {
+    stopTrackingTimer();
+
+    const metrics = buildRouteMetrics(assignedRoute.coordinates);
+    if (metrics.totalDistanceMeters <= 0) {
+      throw new Error('Tuyến đường không đủ dữ liệu để mô phỏng');
+    }
+
+    const startedAt = Date.now();
+    setTrackingSession({
+      order: { ...order, shipping_status: 'Đã phân công' },
+      driver,
+      route: assignedRoute,
+      currentCoordinate: metrics.coordinates[0],
+      status: 'Đã phân công',
+      progress: 0,
+      remainingDistanceMeters: metrics.totalDistanceMeters,
+      etaSeconds: Math.ceil(SIMULATION_DURATION_MS / 1000),
+    });
+
+    trackingTimerRef.current = setInterval(() => {
+      const elapsed = Date.now() - startedAt;
+      const progress = Math.min(elapsed / SIMULATION_DURATION_MS, 1);
+      const currentCoordinate = interpolateRouteCoordinate(metrics, progress);
+
+      setTrackingSession((currentSession) => {
+        if (!currentSession) return null;
+        return {
+          ...currentSession,
+          currentCoordinate,
+          status: progress >= 1 ? 'Đã đến điểm lấy' : 'Tài xế đang đến điểm lấy',
+          progress,
+          remainingDistanceMeters: metrics.totalDistanceMeters * (1 - progress),
+          etaSeconds: Math.max(0, Math.ceil((SIMULATION_DURATION_MS - elapsed) / 1000)),
+        };
+      });
+
+      if (progress >= 1) stopTrackingTimer();
+    }, SIMULATION_TICK_MS);
+  };
+
   const handleAssignDriver = async () => {
-    if (!selectedOrder || !selectedDriver) return;
+    if (!selectedOrder || !selectedDriver || !route) return;
 
     setAssigning(true);
     setErrorMessage('');
@@ -390,7 +471,8 @@ export default function DriverMapManagement() {
       setOrders((currentOrders) =>
         currentOrders.filter((order) => order.OrderID !== selectedOrder.OrderID),
       );
-      closeSelection();
+      setDropdownOpen(false);
+      startMockTracking(selectedOrder, selectedDriver, route);
     } catch (error) {
       console.error('Không thể phân công tài xế:', error);
       setErrorMessage('Không thể xác nhận phân công tài xế.');
@@ -400,8 +482,10 @@ export default function DriverMapManagement() {
   };
 
   const closeSelection = () => {
+    stopTrackingTimer();
     orderRequestRef.current += 1;
     driverRequestRef.current += 1;
+    setTrackingSession(null);
     setSelectedOrder(null);
     setSelectedDriver(null);
     setOrderCoordinate(null);
@@ -418,6 +502,9 @@ export default function DriverMapManagement() {
       duration: 700,
     });
   };
+
+  const visibleDriverCoordinate = trackingSession?.currentCoordinate ?? driverCoordinate;
+  const visibleRoute = trackingSession?.route ?? route;
 
   if (!canRenderMap) {
     return (
@@ -458,21 +545,21 @@ export default function DriverMapManagement() {
           </Marker>
         )}
 
-        {driverCoordinate && (
-          <Marker id="selected-driver" lngLat={driverCoordinate} anchor="bottom">
+        {visibleDriverCoordinate && (
+          <Marker id="selected-driver" lngLat={visibleDriverCoordinate} anchor="bottom">
             <View style={styles.driverMarker}>
               <Ionicons name="car-sport" size={22} color="#ffffff" />
             </View>
           </Marker>
         )}
 
-        {route && route.coordinates.length > 1 && (
+        {visibleRoute && visibleRoute.coordinates.length > 1 && (
           <GeoJSONSource
             id="selected-route"
             data={{
               type: 'Feature',
               properties: {},
-              geometry: { type: 'LineString', coordinates: route.coordinates },
+              geometry: { type: 'LineString', coordinates: visibleRoute.coordinates },
             }}
           >
             <Layer
@@ -488,15 +575,17 @@ export default function DriverMapManagement() {
         )}
       </Map>
 
-      <OrdersPanel
-        loading={loadingData}
-        orders={orders}
-        selectedOrderID={selectedOrder?.OrderID ?? null}
-        top={Math.max(insets.top + 8, 16)}
-        onSelect={(order) => void handleSelectOrder(order)}
-      />
+      {!trackingSession && (
+        <OrdersPanel
+          loading={loadingData}
+          orders={orders}
+          selectedOrderID={selectedOrder?.OrderID ?? null}
+          top={Math.max(insets.top + 8, 16)}
+          onSelect={(order) => void handleSelectOrder(order)}
+        />
+      )}
 
-      {selectedOrder && (
+      {selectedOrder && !trackingSession && (
         <DriverSelectPanel
           order={selectedOrder}
           drivers={drivers}
@@ -511,6 +600,10 @@ export default function DriverMapManagement() {
           onAssign={() => void handleAssignDriver()}
           onClose={closeSelection}
         />
+      )}
+
+      {trackingSession && (
+        <TrackingPanel session={trackingSession} onClose={closeSelection} />
       )}
 
       <TouchableOpacity
@@ -690,6 +783,93 @@ function DriverSelectPanel({
   );
 }
 
+function TrackingPanel({ session, onClose }: TrackingPanelProps) {
+  const completed = session.status === 'Đã đến điểm lấy';
+  const progressPercent = Math.round(session.progress * 100);
+  const progressWidth = `${progressPercent}%` as `${number}%`;
+
+  return (
+    <View style={styles.selectionPanel}>
+      <View style={styles.selectionHeader}>
+        <View style={styles.flexOne}>
+          <Text style={styles.selectionEyebrow}>THEO DÕI ĐƠN HÀNG #{session.order.OrderID}</Text>
+          <Text style={styles.selectionTitle} numberOfLines={1}>
+            {session.driver.driver_name || 'Tài xế'}
+          </Text>
+          <Text style={styles.trackingPlate}>
+            {session.driver.driver_license_plate_number || 'Chưa có biển số'}
+          </Text>
+        </View>
+        <TouchableOpacity style={styles.closeButton} onPress={onClose}>
+          <Ionicons name="close" size={22} color="#64748b" />
+        </TouchableOpacity>
+      </View>
+
+      <View style={[styles.trackingStatusBadge, completed && styles.trackingCompleteBadge]}>
+        <Ionicons
+          name={completed ? 'checkmark-circle' : 'navigate'}
+          size={18}
+          color={completed ? '#15803d' : '#1d4ed8'}
+        />
+        <Text style={[styles.trackingStatusText, completed && styles.trackingCompleteText]}>
+          {session.status}
+        </Text>
+      </View>
+
+      <View style={styles.trackingRouteRow}>
+        <View style={styles.trackingPoint}>
+          <Ionicons name="car-sport" size={16} color="#ffffff" />
+        </View>
+        <View style={styles.trackingRouteLine} />
+        <Ionicons name="location" size={25} color="#dc2626" />
+        <View style={styles.flexOne}>
+          <Text style={styles.trackingDestinationLabel}>Điểm lấy hàng</Text>
+          <Text style={styles.trackingDestination} numberOfLines={1}>
+            {session.order.sender_address || 'Chưa có địa chỉ'}
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.progressHeader}>
+        <Text style={styles.progressLabel}>Tiến độ mô phỏng</Text>
+        <Text style={styles.progressValue}>{progressPercent}%</Text>
+      </View>
+      <View style={styles.progressTrack}>
+        <View style={[styles.progressFill, { width: progressWidth }]} />
+      </View>
+
+      <View style={styles.trackingMetrics}>
+        <TrackingMetric label="Còn lại" value={formatDistance(session.remainingDistanceMeters)} />
+        <View style={styles.metricDivider} />
+        <TrackingMetric label="ETA mô phỏng" value={formatEta(session.etaSeconds)} />
+        <View style={styles.metricDivider} />
+        <TrackingMetric label="Tiến độ" value={`${progressPercent}%`} />
+      </View>
+
+      {completed ? (
+        <TouchableOpacity style={styles.finishButton} onPress={onClose}>
+          <Ionicons name="flag" size={19} color="#ffffff" />
+          <Text style={styles.assignButtonText}>Kết thúc mô phỏng</Text>
+        </TouchableOpacity>
+      ) : (
+        <View style={styles.autoTrackingHint}>
+          <ActivityIndicator size="small" color="#2563eb" />
+          <Text style={styles.autoTrackingText}>Marker tài xế đang tự động di chuyển theo tuyến</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+function TrackingMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.metricItem}>
+      <Text style={styles.metricValue}>{value}</Text>
+      <Text style={styles.metricLabel}>{label}</Text>
+    </View>
+  );
+}
+
 async function fetchOrders(): Promise<Order[]> {
   if (USE_MOCK_BUSINESS_APIS) {
     const payload = await mockApiResponse(MOCK_ORDERS_RESPONSE);
@@ -827,6 +1007,77 @@ function mockApiResponse<T>(payload: T, delay = 350): Promise<T> {
   return new Promise((resolve) => {
     setTimeout(() => resolve(payload), delay);
   });
+}
+
+function buildRouteMetrics(coordinates: Coordinate[]): RouteMetrics {
+  const cumulativeDistances = [0];
+  let totalDistanceMeters = 0;
+
+  for (let index = 1; index < coordinates.length; index += 1) {
+    totalDistanceMeters += distanceBetweenCoordinates(coordinates[index - 1], coordinates[index]);
+    cumulativeDistances.push(totalDistanceMeters);
+  }
+
+  return { coordinates, cumulativeDistances, totalDistanceMeters };
+}
+
+function interpolateRouteCoordinate(metrics: RouteMetrics, progress: number): Coordinate {
+  const safeProgress = Math.max(0, Math.min(progress, 1));
+  if (safeProgress === 0) return metrics.coordinates[0];
+  if (safeProgress === 1) return metrics.coordinates[metrics.coordinates.length - 1];
+
+  const targetDistance = metrics.totalDistanceMeters * safeProgress;
+  let low = 1;
+  let high = metrics.cumulativeDistances.length - 1;
+
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (metrics.cumulativeDistances[middle] < targetDistance) low = middle + 1;
+    else high = middle;
+  }
+
+  const endIndex = low;
+  const startIndex = endIndex - 1;
+  const segmentStart = metrics.cumulativeDistances[startIndex];
+  const segmentLength = metrics.cumulativeDistances[endIndex] - segmentStart;
+  const segmentProgress = segmentLength > 0
+    ? (targetDistance - segmentStart) / segmentLength
+    : 0;
+  const start = metrics.coordinates[startIndex];
+  const end = metrics.coordinates[endIndex];
+
+  return [
+    start[0] + (end[0] - start[0]) * segmentProgress,
+    start[1] + (end[1] - start[1]) * segmentProgress,
+  ];
+}
+
+function distanceBetweenCoordinates(from: Coordinate, to: Coordinate) {
+  const earthRadiusMeters = 6_371_000;
+  const latitudeDelta = degreesToRadians(to[1] - from[1]);
+  const longitudeDelta = degreesToRadians(to[0] - from[0]);
+  const fromLatitude = degreesToRadians(from[1]);
+  const toLatitude = degreesToRadians(to[1]);
+  const haversine =
+    Math.sin(latitudeDelta / 2) ** 2
+    + Math.cos(fromLatitude) * Math.cos(toLatitude) * Math.sin(longitudeDelta / 2) ** 2;
+
+  return earthRadiusMeters * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
+
+function degreesToRadians(value: number) {
+  return value * Math.PI / 180;
+}
+
+function formatDistance(distanceMeters: number) {
+  if (distanceMeters >= 1000) return `${(distanceMeters / 1000).toFixed(1)} km`;
+  return `${Math.max(0, Math.round(distanceMeters))} m`;
+}
+
+function formatEta(seconds: number) {
+  const safeSeconds = Math.max(0, Math.ceil(seconds));
+  if (safeSeconds < 60) return `${safeSeconds}s`;
+  return `${Math.floor(safeSeconds / 60)}m ${safeSeconds % 60}s`;
 }
 
 const styles = StyleSheet.create({
@@ -969,6 +1220,86 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8fafc',
   },
   routeStatusText: { flex: 1, fontSize: 11, color: '#475569' },
+  trackingPlate: { marginTop: 2, fontSize: 11, color: '#64748b' },
+  trackingStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 7,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderRadius: 18,
+    backgroundColor: '#dbeafe',
+  },
+  trackingCompleteBadge: { backgroundColor: '#dcfce7' },
+  trackingStatusText: { fontSize: 12, fontWeight: '700', color: '#1d4ed8' },
+  trackingCompleteText: { color: '#15803d' },
+  trackingRouteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 13,
+    paddingVertical: 9,
+  },
+  trackingPoint: {
+    width: 31,
+    height: 31,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#111827',
+  },
+  trackingRouteLine: { width: 28, height: 3, marginHorizontal: 5, backgroundColor: '#93c5fd' },
+  trackingDestinationLabel: { fontSize: 10, fontWeight: '700', color: '#64748b' },
+  trackingDestination: { marginTop: 2, fontSize: 11, color: '#1e293b' },
+  progressHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 2,
+  },
+  progressLabel: { fontSize: 11, fontWeight: '600', color: '#475569' },
+  progressValue: { fontSize: 12, fontWeight: '800', color: '#2563eb' },
+  progressTrack: {
+    height: 8,
+    marginTop: 6,
+    overflow: 'hidden',
+    borderRadius: 4,
+    backgroundColor: '#e2e8f0',
+  },
+  progressFill: { height: '100%', borderRadius: 4, backgroundColor: '#2563eb' },
+  trackingMetrics: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 13,
+    paddingVertical: 10,
+    borderRadius: 11,
+    backgroundColor: '#f8fafc',
+  },
+  metricItem: { flex: 1, alignItems: 'center' },
+  metricValue: { fontSize: 13, fontWeight: '800', color: '#0f172a' },
+  metricLabel: { marginTop: 2, fontSize: 9, color: '#64748b' },
+  metricDivider: { width: 1, height: 28, backgroundColor: '#e2e8f0' },
+  autoTrackingHint: {
+    height: 46,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 11,
+    borderRadius: 11,
+    backgroundColor: '#eff6ff',
+  },
+  autoTrackingText: { fontSize: 11, fontWeight: '600', color: '#1d4ed8' },
+  finishButton: {
+    height: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 11,
+    borderRadius: 12,
+    backgroundColor: '#16a34a',
+  },
   assignButton: {
     height: 48,
     flexDirection: 'row',
@@ -993,7 +1324,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     elevation: 6,
   },
-  locationButtonRaised: { bottom: 286 },
+  locationButtonRaised: { bottom: 360 },
   mapLoadingBadge: {
     position: 'absolute',
     top: 16,
@@ -1017,6 +1348,6 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: 'rgba(220,38,38,0.95)',
   },
-  errorBannerRaised: { bottom: 286 },
+  errorBannerRaised: { bottom: 360 },
   errorText: { textAlign: 'center', fontSize: 12, fontWeight: '600', color: '#ffffff' },
 });
