@@ -1,928 +1,1353 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import Constants from "expo-constants";
-import * as Location from "expo-location";
-import React, { useEffect, useState, useRef } from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View, Platform } from "react-native";
-// Load MapLibre dynamically at runtime to avoid compile-time errors when
-// the native MapLibre package is not installed in the environment.
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import {
+  Camera,
+  type CameraRef,
+  GeoJSONSource,
+  Layer,
+  Map,
+  Marker,
+} from '@maplibre/maplibre-react-native';
+import Constants from 'expo-constants';
+import * as Location from 'expo-location';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+type Coordinate = [longitude: number, latitude: number];
 
 type Order = {
   OrderID: number;
   order_name?: string;
-  goods_quantity?: number;
+  order_dispatch_date?: string;
   receiver_name?: string;
   sender_name?: string;
   sender_address?: string;
-  driver_name?: string;
-  wagon_number?: string;
-  shipping_status?: string;
+  receiver_address?: string;
+  sender_phone_number?: string;
+  receiver_phone_number?: string;
+  goods_quantity?: number;
   goods_weight?: string;
-  goods_volumn?: string;
+  goods_volume?: string;
+  note?: string;
+  handling_instruction?: string;
+  shipping_route?: string;
+  driver_name?: string;
+  driver_license_plate?: string;
+  driver_phone_number?: string;
+  shipping_status?: string;
+  shipping_position?: string;
+  shipping_payment?: string;
+  created_at?: string;
   organization?: string;
 };
 
 type Driver = {
   DriverIDs: number;
+  accountID?: number;
   driver_name?: string;
   driver_link?: string;
   driver_license_plate_number?: string;
   driver_phone_number?: string;
-  amount_of_gas?: number;
-  money_amount_of_gas?: number;
+  amount_of_gas?: string;
+  money_amount_of_gas?: string;
   the_remaining_volume_of_the_car?: number;
   the_remaining_weight_of_the_car?: number;
   drop_off_distance?: number;
+  create_at?: string;
 };
 
-const GOONG_MAPTILES_KEY = process.env.EXPO_PUBLIC_GOONG_MAPTILES_KEY ?? "";
-const GOONG_STYLE_URL = "https://tiles.goong.io/assets/goong_map_web.json";
-const GOONG_API_KEY = process.env.EXPO_PUBLIC_GOONG_API_KEY ?? "";
-const ANDROID_GOOGLE_MAPS_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ?? "";
+type RouteResult = {
+  coordinates: Coordinate[];
+  distanceText?: string;
+  durationText?: string;
+};
+
+type TrackingStatus = 'Đã phân công' | 'Tài xế đang đến điểm lấy' | 'Đã đến điểm lấy';
+
+type TrackingSession = {
+  order: Order;
+  driver: Driver;
+  route: RouteResult;
+  currentCoordinate: Coordinate;
+  status: TrackingStatus;
+  progress: number;
+  remainingDistanceMeters: number;
+  etaSeconds: number;
+};
+
+type RouteMetrics = {
+  coordinates: Coordinate[];
+  cumulativeDistances: number[];
+  totalDistanceMeters: number;
+};
+
+type OrdersPanelProps = {
+  loading: boolean;
+  orders: Order[];
+  selectedOrderID: number | null;
+  top: number;
+  onSelect: (order: Order) => void;
+};
+
+type DriverSelectPanelProps = {
+  order: Order;
+  drivers: Driver[];
+  selectedDriver: Driver | null;
+  dropdownOpen: boolean;
+  geocoding: boolean;
+  routing: boolean;
+  assigning: boolean;
+  route: RouteResult | null;
+  onToggleDropdown: () => void;
+  onSelectDriver: (driver: Driver) => void;
+  onAssign: () => void;
+  onClose: () => void;
+};
+
+type TrackingPanelProps = {
+  session: TrackingSession;
+  onClose: () => void;
+};
+
+const SERVER_URL = 'https://freight-application-server.onrender.com/api/v1';
+const GOONG_MAPTILES_KEY = process.env.EXPO_PUBLIC_GOONG_MAPTILES_KEY ?? '';
+const GOONG_API_KEY = process.env.EXPO_PUBLIC_GOONG_API_KEY ?? '';
+const GOONG_STYLE_URL = `https://tiles.goong.io/assets/goong_map_web.json?api_key=${encodeURIComponent(GOONG_MAPTILES_KEY)}`;
+const DEFAULT_COORDINATE: Coordinate = [106.7009, 10.7769];
+const SIMULATION_DURATION_MS = 45_000;
+const SIMULATION_TICK_MS = 500;
 const IS_EXPO_GO =
-  Constants.appOwnership === "expo" ||
-  Constants.executionEnvironment === "storeClient";
+  Constants.appOwnership === 'expo' ||
+  Constants.executionEnvironment === 'storeClient';
+const USE_MOCK_BUSINESS_APIS = true;
+const API_ENDPOINTS = {
+  ordersByStatus: `${SERVER_URL}/orders/getAllOrderByStatus`,
+  drivers: `${SERVER_URL}/drivers/getAllDrivers`,
+  assignDriver: `${SERVER_URL}/drivers/createDriverOrderDetail`,
+};
+
+const MOCK_ORDERS_RESPONSE: { data: Order[] } = {
+  data: [
+    {
+      OrderID: 9001,
+      order_name: 'Giao linh kiện điện tử',
+      order_dispatch_date: '2026-08-16T08:00:00.000Z',
+      sender_name: 'Kho trung tâm Quận 1',
+      receiver_name: 'Cửa hàng Thủ Đức',
+      sender_address: '72 Lê Thánh Tôn, Bến Nghé, Quận 1, Thành phố Hồ Chí Minh',
+      receiver_address: '1 Võ Văn Ngân, Linh Chiểu, Thủ Đức, Thành phố Hồ Chí Minh',
+      sender_phone_number: '0900000001',
+      receiver_phone_number: '0900000002',
+      goods_quantity: 12,
+      goods_weight: '350.00',
+      goods_volume: '8.50',
+      shipping_status: 'Đã tiếp nhận',
+      shipping_position: 'Kho Quận 1',
+      shipping_payment: 'Đã thanh toán',
+      organization: 'Freight Demo Quận 1',
+      created_at: '2026-08-16T07:30:00.000Z',
+    },
+    {
+      OrderID: 9002,
+      order_name: 'Giao hàng tiêu dùng',
+      order_dispatch_date: '2026-08-16T09:00:00.000Z',
+      sender_name: 'Kho Thủ Đức',
+      receiver_name: 'Điểm nhận Dĩ An',
+      sender_address: '1 Võ Văn Ngân, Linh Chiểu, Thủ Đức, Thành phố Hồ Chí Minh',
+      receiver_address: 'An Bình, Dĩ An, Bình Dương',
+      sender_phone_number: '0900000003',
+      receiver_phone_number: '0900000004',
+      goods_quantity: 20,
+      goods_weight: '500.00',
+      goods_volume: '12.00',
+      shipping_status: 'Đã tiếp nhận',
+      shipping_position: 'Kho Thủ Đức',
+      shipping_payment: 'Chưa thanh toán',
+      organization: 'Freight Demo Thủ Đức',
+      created_at: '2026-08-16T08:15:00.000Z',
+    },
+  ],
+};
+
+const MOCK_DRIVERS_RESPONSE: { data: Driver[] } = {
+  data: [
+    {
+      DriverIDs: 1,
+      driver_name: 'Trần Văn Sơn',
+      accountID: 4,
+      driver_link: 'KDC Nam Thịnh, An Bình, Dĩ An, Bình Dương',
+      driver_license_plate_number: '50H 19249',
+      driver_phone_number: '0981391557',
+      amount_of_gas: '19.00',
+      money_amount_of_gas: '2000000.00',
+      the_remaining_volume_of_the_car: 15,
+      the_remaining_weight_of_the_car: 16,
+      drop_off_distance: 20,
+      create_at: '2026-05-07T08:11:44.000Z',
+    },
+    {
+      DriverIDs: 2,
+      driver_name: 'Nguyễn Minh Hải',
+      accountID: 8,
+      driver_link: '268 Lý Thường Kiệt, Phường 14, Quận 10, Thành phố Hồ Chí Minh',
+      driver_license_plate_number: '51D 67890',
+      driver_phone_number: '0909000002',
+      amount_of_gas: '25.00',
+      money_amount_of_gas: '2500000.00',
+      the_remaining_volume_of_the_car: 20,
+      the_remaining_weight_of_the_car: 22,
+      drop_off_distance: 18,
+      create_at: '2026-06-12T03:30:00.000Z',
+    },
+  ],
+};
 
 export default function DriverMapManagement() {
-  const [MapLibreGL, setMapLibreGL] = useState<any | null>(null);
-
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const mod = await import('@maplibre/maplibre-react-native');
-        const impl = ((mod as any).default ?? mod) as any;
-        if (mounted) setMapLibreGL(impl);
-      } catch (e) {
-        console.warn('MapLibre native module not available:', e);
-      }
-    })();
-    return () => { mounted = false; };
-  }, []);
   const insets = useSafeAreaInsets();
+  const cameraRef = useRef<CameraRef | null>(null);
+  const geocodeCacheRef = useRef(new globalThis.Map<string, Coordinate>());
+  const orderRequestRef = useRef(0);
+  const driverRequestRef = useRef(0);
+  const trackingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const [orders, setOrders] = useState<Order[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
-  const [viewMode, setViewMode] = useState<'order' | 'driver'>('order');
-  const [selectedDriverID, setSelectedDriverID] = useState<number | null>(null);
-  const [currentLocation, setCurrentLocation] = useState<{
-    latitude: number;
-    longitude: number;
-    zoomLevel: number;
-  } | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [selectedOrderID, setSelectedOrderID] = useState<number | null>(null);
-  const [selectedOrderCoordinate, setSelectedOrderCoordinate] = useState<[number, number] | null>(null);
-  const [selectedDriverCoordinate, setSelectedDriverCoordinate] = useState<[number, number] | null>(null);
-  const [routeCoordinates, setRouteCoordinates] = useState<[number, number][] | null>(null);
-  const canUseGoong = Boolean(GOONG_MAPTILES_KEY && GOONG_API_KEY && !IS_EXPO_GO);
-  const [errorMessage, setErrorMessage] = useState(
-    IS_EXPO_GO
-      ? "Goong map cần Development Build và không chạy trực tiếp trong Expo Go."
-      : GOONG_MAPTILES_KEY && GOONG_API_KEY
-        ? ""
-        : !GOONG_MAPTILES_KEY
-          ? "Thiếu EXPO_PUBLIC_GOONG_MAPTILES_KEY để hiển thị bản đồ Goong."
-          : "Thiếu EXPO_PUBLIC_GOONG_API_KEY để gọi API Goong.",
-  );
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [selectedDriver, setSelectedDriver] = useState<Driver | null>(null);
+  const [orderCoordinate, setOrderCoordinate] = useState<Coordinate | null>(null);
+  const [driverCoordinate, setDriverCoordinate] = useState<Coordinate | null>(null);
+  const [currentCoordinate, setCurrentCoordinate] = useState<Coordinate>(DEFAULT_COORDINATE);
+  const [route, setRoute] = useState<RouteResult | null>(null);
+  const [trackingSession, setTrackingSession] = useState<TrackingSession | null>(null);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [loadingData, setLoadingData] = useState(true);
+  const [geocoding, setGeocoding] = useState(false);
+  const [routing, setRouting] = useState(false);
+  const [assigning, setAssigning] = useState(false);
+  const [mapStyleLoaded, setMapStyleLoaded] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+
+  const canRenderMap = Boolean(GOONG_MAPTILES_KEY && !IS_EXPO_GO);
 
   useEffect(() => {
-    fetchDriverDetails();
-    fetchOrderStatus();
-    let isMounted = true;
-
-    const getCurrentLocation = async () => {
-      if (!canUseGoong) {
-        setLoading(false);
-        return;
-      }
-
-      try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-
-        if (status !== "granted") {
-          if (isMounted) {
-            setErrorMessage("Bạn chưa cấp quyền vị trí cho ứng dụng.");
-          }
-          return;
-        }
-
-        const location = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.High,
-        });
-
-        const nextLocation = {
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-          zoomLevel: 15,
-        };
-
-        if (isMounted) {
-          setCurrentLocation(nextLocation);
-        }
-      } catch (error) {
-        console.error("Lỗi lấy vị trí hiện tại:", error);
-        // Fallback: try to get last known position (works if Google Play services connection dropped)
-        try {
-          const last = await Location.getLastKnownPositionAsync();
-          if (last && isMounted) {
-            setCurrentLocation({
-              latitude: last.coords.latitude,
-              longitude: last.coords.longitude,
-              zoomLevel: 15,
-            });
-            if (isMounted) setErrorMessage("Sử dụng vị trí lưu trữ tạm thời do sự cố dịch vụ vị trí.");
-            return;
-          }
-        } catch (e) {
-          console.warn("getLastKnownPositionAsync fallback failed:", e);
-        }
-
-        if (isMounted) {
-          setErrorMessage("Không thể lấy vị trí hiện tại. Hãy kiểm tra Google Play services hoặc thử thiết bị thật.");
-        }
-      } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
-      }
-    };
-
-    getCurrentLocation();
     return () => {
-      isMounted = false;
+      if (trackingTimerRef.current) clearInterval(trackingTimerRef.current);
     };
-  }, [canUseGoong]);
+  }, []);
 
   useEffect(() => {
-    if (selectedDriverCoordinate && selectedOrderCoordinate) {
-      fetchRoute(selectedDriverCoordinate, selectedOrderCoordinate);
-    } else {
-      setRouteCoordinates(null);
-    }
-  }, [selectedDriverCoordinate, selectedOrderCoordinate]);
+    let active = true;
 
-  const fetchOrderStatus = async () => {
-    try {
-      const response = await fetch('https://freight-application-server.onrender.com/api/v1/orders/getAllOrderByStatus', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          shipping_status: "Đã tiếp nhận"
-        })
+    Promise.all([fetchOrders(), fetchDrivers()])
+      .then(([orderList, driverList]) => {
+        if (!active) return;
+        setOrders(orderList);
+        setDrivers(driverList);
+      })
+      .catch((error) => {
+        console.error('Không thể tải dữ liệu bản đồ:', error);
+        if (active) setErrorMessage('Không thể tải danh sách đơn hàng hoặc tài xế.');
+      })
+      .finally(() => {
+        if (active) setLoadingData(false);
       });
 
-      const contentType = response.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/json')) {
-        const text = await response.text();
-        console.error("Server trả về không phải JSON:", text.slice(0, 200));
-        console.log("Lỗi server: Máy chủ chưa sẵn sàng hoặc đang khởi động lại.");
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadCurrentLocation = async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') return;
+
+        const location = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+        if (!active) return;
+
+        const coordinate: Coordinate = [
+          location.coords.longitude,
+          location.coords.latitude,
+        ];
+        setCurrentCoordinate(coordinate);
+        cameraRef.current?.easeTo({ center: coordinate, zoom: 14, duration: 600 });
+      } catch (error) {
+        console.warn('Không thể lấy vị trí thiết bị:', error);
+      }
+    };
+
+    void loadCurrentLocation();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!driverCoordinate || !orderCoordinate) {
+      setRoute(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    setRouting(true);
+
+    fetchDrivingRoute(driverCoordinate, orderCoordinate, controller.signal)
+      .then((result) => setRoute(result))
+      .catch((error) => {
+        if (error instanceof Error && error.name === 'AbortError') return;
+        console.error('Không thể lấy tuyến đường:', error);
+        setRoute(null);
+        setErrorMessage('Không thể tạo tuyến đường giữa tài xế và đơn hàng.');
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setRouting(false);
+      });
+
+    return () => controller.abort();
+  }, [driverCoordinate, orderCoordinate]);
+
+  useEffect(() => {
+    if (!driverCoordinate || !orderCoordinate) return;
+
+    const west = Math.min(driverCoordinate[0], orderCoordinate[0]);
+    const south = Math.min(driverCoordinate[1], orderCoordinate[1]);
+    const east = Math.max(driverCoordinate[0], orderCoordinate[0]);
+    const north = Math.max(driverCoordinate[1], orderCoordinate[1]);
+
+    if (west === east && south === north) {
+      cameraRef.current?.easeTo({ center: driverCoordinate, zoom: 16, duration: 700 });
+      return;
+    }
+
+    cameraRef.current?.fitBounds([west, south, east, north], {
+      padding: { top: 120, right: 70, bottom: 300, left: 70 },
+      duration: 900,
+    });
+  }, [driverCoordinate, orderCoordinate]);
+
+  const resolveAddress = async (address?: string): Promise<Coordinate | null> => {
+    const normalizedAddress = address?.trim();
+    if (!normalizedAddress) return null;
+
+    const cached = geocodeCacheRef.current.get(normalizedAddress);
+    if (cached) return cached;
+
+    const coordinate = await geocodeAddress(normalizedAddress);
+    if (coordinate) geocodeCacheRef.current.set(normalizedAddress, coordinate);
+    return coordinate;
+  };
+
+  const handleSelectOrder = async (order: Order) => {
+    const requestID = ++orderRequestRef.current;
+    driverRequestRef.current += 1;
+    setSelectedOrder(order);
+    setSelectedDriver(null);
+    setOrderCoordinate(null);
+    setDriverCoordinate(null);
+    setRoute(null);
+    setDropdownOpen(false);
+    setErrorMessage('');
+
+    if (!GOONG_API_KEY) {
+      setErrorMessage('Thiếu EXPO_PUBLIC_GOONG_API_KEY để tìm tọa độ đơn hàng.');
+      return;
+    }
+
+    setGeocoding(true);
+    try {
+      const coordinate = await resolveAddress(order.sender_address);
+      if (requestID !== orderRequestRef.current) return;
+
+      if (!coordinate) {
+        setErrorMessage(`Không tìm thấy tọa độ đơn hàng #${order.OrderID}.`);
         return;
       }
-
-      const data = await response.json();
-      if (response.ok) {
-        setOrders(data.data || data || []);
-      } else {
-        console.log("Lỗi server:", data.message || "Không thể tải danh sách");
-      }
+      setOrderCoordinate(coordinate);
+      cameraRef.current?.easeTo({ center: coordinate, zoom: 15, duration: 600 });
     } catch (error) {
-      console.error("Lỗi kết nối", "Không thể kết nối đến máy chủ");
-      console.error(error);
+      console.error('Không thể geocode đơn hàng:', error);
+      if (requestID === orderRequestRef.current) {
+        setErrorMessage(`Không thể xác định tọa độ đơn hàng #${order.OrderID}.`);
+      }
     } finally {
-      setLoading(false);
+      if (requestID === orderRequestRef.current) setGeocoding(false);
     }
   };
-  const fetchDriverDetails = async () => {
+
+  const handleSelectDriver = async (driver: Driver) => {
+    const requestID = ++driverRequestRef.current;
+    setSelectedDriver(driver);
+    setDriverCoordinate(null);
+    setRoute(null);
+    setDropdownOpen(false);
+    setErrorMessage('');
+
+    setGeocoding(true);
     try {
-      const response = await fetch('https://freight-application-server.onrender.com/api/v1/drivers/getAllDrivers');
-      const data = await response.json();
-      if (response.ok) {
-        setDrivers(data.data || []);
-      } else {
-        console.log("Lỗi", "Không thể tải danh sách tài xế");
+      const coordinate = await resolveAddress(driver.driver_link);
+      if (requestID !== driverRequestRef.current) return;
+
+      if (!coordinate) {
+        setErrorMessage(`Không tìm thấy tọa độ tài xế ${driver.driver_name ?? ''}.`);
+        return;
       }
+      setDriverCoordinate(coordinate);
     } catch (error) {
-      console.error("Lỗi kết nối", "Không thể kết nối đến máy chủ");
-      console.error(error);
-    }
-  };
-  const SelectedOrder = async (selectedOrder: Order) => {
-    setSelectedOrderID(selectedOrder.OrderID);
-    setSelectedOrderCoordinate(null);
-    setSelectedDriverCoordinate(null);
-
-    // Geocode sender address
-    const orderFeatures = await searchAddress(selectedOrder.sender_address);
-    if (orderFeatures && orderFeatures.length > 0) {
-      const [longitude, latitude] = orderFeatures[0].geometry.coordinates;
-      const coord: [number, number] = [longitude, latitude];
-      setSelectedOrderCoordinate(coord);
-    }
-
-    // Geocode driver_link address for the assigned driver
-    const matchedDriver = drivers.find(d => d.driver_name === selectedOrder.driver_name);
-    if (matchedDriver?.driver_link) {
-      const driverFeatures = await searchAddress(matchedDriver.driver_link);
-      if (driverFeatures && driverFeatures.length > 0) {
-        const [longitude, latitude] = driverFeatures[0].geometry.coordinates;
-        setSelectedDriverCoordinate([longitude, latitude]);
+      console.error('Không thể geocode tài xế:', error);
+      if (requestID === driverRequestRef.current) {
+        setErrorMessage(`Không thể xác định tọa độ tài xế ${driver.driver_name ?? ''}.`);
       }
+    } finally {
+      if (requestID === driverRequestRef.current) setGeocoding(false);
     }
   };
-  const renderOrderRow = (order: Order, index: number) => {
-  if (order.shipping_status === "Đã lên toa") {
-    return null; 
+
+  const stopTrackingTimer = () => {
+    if (!trackingTimerRef.current) return;
+    clearInterval(trackingTimerRef.current);
+    trackingTimerRef.current = null;
+  };
+
+  const startMockTracking = (order: Order, driver: Driver, assignedRoute: RouteResult) => {
+    stopTrackingTimer();
+
+    const metrics = buildRouteMetrics(assignedRoute.coordinates);
+    if (metrics.totalDistanceMeters <= 0) {
+      throw new Error('Tuyến đường không đủ dữ liệu để mô phỏng');
+    }
+
+    const startedAt = Date.now();
+    setTrackingSession({
+      order: { ...order, shipping_status: 'Đã phân công' },
+      driver,
+      route: assignedRoute,
+      currentCoordinate: metrics.coordinates[0],
+      status: 'Đã phân công',
+      progress: 0,
+      remainingDistanceMeters: metrics.totalDistanceMeters,
+      etaSeconds: Math.ceil(SIMULATION_DURATION_MS / 1000),
+    });
+
+    trackingTimerRef.current = setInterval(() => {
+      const elapsed = Date.now() - startedAt;
+      const progress = Math.min(elapsed / SIMULATION_DURATION_MS, 1);
+      const currentCoordinate = interpolateRouteCoordinate(metrics, progress);
+
+      setTrackingSession((currentSession) => {
+        if (!currentSession) return null;
+        return {
+          ...currentSession,
+          currentCoordinate,
+          status: progress >= 1 ? 'Đã đến điểm lấy' : 'Tài xế đang đến điểm lấy',
+          progress,
+          remainingDistanceMeters: metrics.totalDistanceMeters * (1 - progress),
+          etaSeconds: Math.max(0, Math.ceil((SIMULATION_DURATION_MS - elapsed) / 1000)),
+        };
+      });
+
+      if (progress >= 1) stopTrackingTimer();
+    }, SIMULATION_TICK_MS);
+  };
+
+  const handleAssignDriver = async () => {
+    if (!selectedOrder || !selectedDriver || !route) return;
+
+    setAssigning(true);
+    setErrorMessage('');
+    try {
+      await assignDriverToOrder(selectedDriver.DriverIDs, selectedOrder.OrderID);
+      setOrders((currentOrders) =>
+        currentOrders.filter((order) => order.OrderID !== selectedOrder.OrderID),
+      );
+      setDropdownOpen(false);
+      startMockTracking(selectedOrder, selectedDriver, route);
+    } catch (error) {
+      console.error('Không thể phân công tài xế:', error);
+      setErrorMessage('Không thể xác nhận phân công tài xế.');
+    } finally {
+      setAssigning(false);
+    }
+  };
+
+  const closeSelection = () => {
+    stopTrackingTimer();
+    orderRequestRef.current += 1;
+    driverRequestRef.current += 1;
+    setTrackingSession(null);
+    setSelectedOrder(null);
+    setSelectedDriver(null);
+    setOrderCoordinate(null);
+    setDriverCoordinate(null);
+    setRoute(null);
+    setDropdownOpen(false);
+    setGeocoding(false);
+  };
+
+  const centerOnCurrentLocation = () => {
+    cameraRef.current?.easeTo({
+      center: currentCoordinate,
+      zoom: 14,
+      duration: 700,
+    });
+  };
+
+  const visibleDriverCoordinate = trackingSession?.currentCoordinate ?? driverCoordinate;
+  const visibleRoute = trackingSession?.route ?? route;
+
+  if (!canRenderMap) {
+    return (
+      <View style={styles.unavailableContainer}>
+        <Text style={styles.unavailableTitle}>
+          {IS_EXPO_GO ? 'Goong Map cần Development Build' : 'Goong Map chưa được cấu hình'}
+        </Text>
+        <Text style={styles.unavailableText}>
+          {IS_EXPO_GO
+            ? 'MapLibre là native module và không chạy trong Expo Go.'
+            : 'Thêm EXPO_PUBLIC_GOONG_MAPTILES_KEY vào file môi trường.'}
+        </Text>
+      </View>
+    );
   }
 
   return (
-    <View key={order.OrderID ?? index}>
-      <TouchableOpacity onPress={() => SelectedOrder(order)}>
-        <Text style={styles.panelContent} numberOfLines={1}>
-          #{order.OrderID} – {order.organization || order.sender_name || "Khách hàng"} {"\n"}
-        </Text>
-        <View style={styles.divider} />
-      </TouchableOpacity>
-    </View>
-  );
-  };
-  const SelectedDriver = async (driver: Driver) => {
-    setSelectedDriverID(driver.DriverIDs);
-    setSelectedDriverCoordinate(null);
-    if (!driver.driver_link) return;
-    const features = await searchAddress(driver.driver_link);
-    if (features && features.length > 0) {
-      const [longitude, latitude] = features[0].geometry.coordinates;
-      const coord: [number, number] = [longitude, latitude];
-      setSelectedDriverCoordinate(coord);
-    }
-  };
-  const submitDriverOrder = async () => {
-    if (!selectedDriverID || !selectedOrderID) return;
-    try {
-      const response = await fetch('https://freight-application-server.onrender.com/api/v1/drivers/createDriverOrderDetail', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          DriverIDs: selectedDriverID,
-          OrderIDs: [selectedOrderID],
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        console.error("Lỗi xác nhận tài xế:", data.message);
-      }
-    } catch (error) {
-      console.error("Lỗi kết nối:", error);
-    }
-    setSelectedOrderID(null);
-    setSelectedDriverID(null);
-    setViewMode('order');
-    fetchOrderStatus();
-  };
-  const renderDriverRow = (driver: Driver, index: number) => (
-    <View key={driver.DriverIDs ?? index}>
-      <TouchableOpacity onPress={() => SelectedDriver(driver)}>
-        <Text style={styles.panelContent} numberOfLines={1}>
-          {driver.driver_name || 'Tài xế'} – {driver.driver_license_plate_number || '—'}{"\n"}
-        </Text>
-        <View style={styles.divider} />
-      </TouchableOpacity>
-    </View>
-  );
-
-  const renderDriverDetail = (driverID: number) => {
-    const driver = drivers.find(d => d.DriverIDs === driverID);
-    if (!driver) return null;
-
-    return (
-      <View key={driverID} style={styles.bottomPanel}>
-        <View style={styles.dragHandle} />
-        <View style={styles.panelHeader}>
-          <TouchableOpacity onPress={() => setSelectedDriverID(null)} style={styles.closeButton}>
-            <Ionicons name="arrow-back" size={20} color="#64748b" />
-          </TouchableOpacity>
-          <Text style={styles.panelHeaderTitle}>Chi tiết tài xế</Text>
-          <TouchableOpacity onPress={() => { setSelectedDriverID(null); setViewMode('order'); }} style={styles.closeButton}>
-            <Ionicons name="close" size={20} color="#64748b" />
-          </TouchableOpacity>
-        </View>
-        <ScrollView style={styles.panelBody} showsVerticalScrollIndicator={false}>
-          <Text style={styles.orderName}>{driver.driver_name || '—'}</Text>
-          <View style={styles.infoRow}>
-            <Ionicons name="call-outline" size={16} color="#64748b" />
-            <Text style={styles.infoText}>{driver.driver_phone_number || '—'}</Text>
-          </View>
-          <View style={styles.infoRow}>
-            <Ionicons name="car-outline" size={16} color="#64748b" />
-            <Text style={styles.infoText}>{driver.driver_license_plate_number || '—'}</Text>
-          </View>
-          <View style={styles.infoDivider} />
-          <View style={styles.statsRow}>
-            <View style={styles.statItem}>
-              <Text style={styles.statLabel}>Tải trọng còn</Text>
-              <Text style={styles.statValue}>{driver.the_remaining_weight_of_the_car ?? '—'}kg</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.statItem}>
-              <Text style={styles.statLabel}>Thể tích còn</Text>
-              <Text style={styles.statValue}>{driver.the_remaining_volume_of_the_car ?? '—'} lít</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.statItem}>
-              <Text style={styles.statLabel}>Khoảng cách</Text>
-              {/* Distance from driver to sender_address location */}
-              <Text style={styles.statValue}>
-                {selectedDriverCoordinate && selectedOrderCoordinate
-                  ? `${calculateDistance(selectedDriverCoordinate, selectedOrderCoordinate)}km`
-                  : driver.drop_off_distance != null
-                    ? `${driver.drop_off_distance}km`
-                    : '—'}
-              </Text>
-            </View>
-          </View>
-        </ScrollView>
-        <View style={styles.panelFooter}>
-          <TouchableOpacity style={styles.submitButton} onPress={submitDriverOrder}>
-            <Ionicons name="checkmark-circle-outline" size={20} color="#fff" />
-            <Text style={styles.submitText}>Xác nhận tài xế</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  };
-
-  const renderOrderDriver = (orderID: number) => {
-    const order = orders.find(o => o.OrderID === orderID);
-    if (!order) return null;
-
-    return (
-      <View key={orderID} style={styles.bottomPanel}>
-        {/* Drag handle */}
-        <View style={styles.dragHandle} />
-
-        {/* Header */}
-        <View style={styles.panelHeader}>
-          <Text style={styles.panelHeaderTitle}>Chi tiết đơn hàng</Text>
-          <TouchableOpacity onPress={() => { setSelectedOrderID(null); setSelectedDriverCoordinate(null); }} style={styles.closeButton}>
-            <Ionicons name="close" size={20} color="#64748b" />
-          </TouchableOpacity>
-        </View>
-
-        <ScrollView style={styles.panelBody} showsVerticalScrollIndicator={false}>
-          {/* Order name */}
-          <Text style={styles.orderName}>{order.order_name || '—'}</Text>
-
-          {/* Address row */}
-          <View style={styles.infoRow}>
-            <Ionicons name="location-outline" size={16} color="#64748b" />
-            <Text style={styles.infoText}>{order.sender_address || '—'}</Text>
-          </View>
-
-          <View style={styles.infoDivider} />
-
-          {/* Stats row */}
-          <View style={styles.statsRow}>
-            <View style={styles.statItem}>
-              <Text style={styles.statLabel}>Số lượng</Text>
-              <Text style={styles.statValue}>{order.goods_quantity ?? '—'}</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.statItem}>
-              <Text style={styles.statLabel}>Khối lượng</Text>
-              <Text style={styles.statValue}>{order.goods_weight ? `${order.goods_weight} kg` : '—'}</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.statItem}>
-              <Text style={styles.statLabel}>Thể tích</Text>
-              <Text style={styles.statValue}>{order.goods_volumn || '—'}</Text>
-            </View>
-          </View>
-        </ScrollView>
-
-        {/* Action Button */}
-        <View style={styles.panelFooter}>
-          <TouchableOpacity style={styles.submitButton} onPress={() => { setViewMode('driver'); }}>
-            <Ionicons name="checkmark-circle-outline" size={20} color="#fff" />
-            <Text style={styles.submitText}>Đi đến chọn tài xế</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  };
-  
-  const centerCoordinate = currentLocation
-    ? ([currentLocation!.longitude, currentLocation!.latitude] as [number, number])
-    : null;
-  const decodePolyline = (encoded: string): [number, number][] => {
-    const coordinates: [number, number][] = [];
-    let index = 0;
-    let lat = 0;
-    let lng = 0;
-
-    while (index < encoded.length) {
-      let result = 0;
-      let shift = 0;
-      let byte = 0;
-      do {
-        byte = encoded.charCodeAt(index++) - 63;
-        result |= (byte & 0x1f) << shift;
-        shift += 5;
-      } while (byte >= 0x20);
-      const deltaLat = (result & 1) !== 0 ? ~(result >> 1) : result >> 1;
-      lat += deltaLat;
-
-      result = 0;
-      shift = 0;
-      do {
-        byte = encoded.charCodeAt(index++) - 63;
-        result |= (byte & 0x1f) << shift;
-        shift += 5;
-      } while (byte >= 0x20);
-      const deltaLng = (result & 1) !== 0 ? ~(result >> 1) : result >> 1;
-      lng += deltaLng;
-
-      coordinates.push([lng * 1e-5, lat * 1e-5]);
-    }
-
-    return coordinates;
-  };
-
-  const fetchRoute = async (from: [number, number], to: [number, number]) => {
-    const url = `https://rsapi.goong.io/direction?origin=${from[1]},${from[0]}&destination=${to[1]},${to[0]}&vehicle=car&api_key=${GOONG_API_KEY}`;
-    try {
-      const response = await fetch(url);
-      const data = await response.json();
-      if (data.routes && data.routes.length > 0) {
-        const route = data.routes[0];
-        if (route.geometry && route.geometry.coordinates) {
-          setRouteCoordinates(route.geometry.coordinates);
-        } else if (route.overview_polyline?.points) {
-          setRouteCoordinates(decodePolyline(route.overview_polyline.points));
-        } else {
-          setRouteCoordinates(null);
-        }
-      } else {
-        setRouteCoordinates(null);
-      }
-    } catch (error) {
-      console.error("Lỗi lấy tuyến đường:", error);
-      setRouteCoordinates(null);
-    }
-  };
-
-  const calculateDistance = (coord1: [number, number], coord2: [number, number]): number => {
-    const [lon1, lat1] = coord1;
-    const [lon2, lat2] = coord2;
-    const R = 6371;
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a =
-      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-      Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    return Math.round(6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) * 10) / 10;
-  };
-
-  const searchAddress = async (address: string | undefined) => {
-    if (!address) {
-      console.warn("address is undefined");
-      return [];
-    }
-
-    const url = `https://rsapi.goong.io/Geocode?address=${encodeURIComponent(address)}&api_key=${GOONG_API_KEY}`;
-
-    try {
-      const response = await fetch(url);
-      const data = await response.json();
-
-      if (data.results && data.results.length > 0) {
-        const topResult = data.results[0];
-        const { lat, lng } = topResult.geometry.location;
-        return [{
-          geometry: {
-            type: "Point",
-            coordinates: [lng, lat]
-          },
-          place_name: topResult.formatted_address
-        }];
-      } else {
-        console.log("Không tìm thấy địa chỉ phù hợp từ Goong");
-        return [];
-      }
-    } catch (error) {
-      console.error("Lỗi gọi API Goong:", error);
-      return [];
-    }
-  };
-
-
-  // Native map implementation using MapLibre and Goong raster tiles.
-  // Note: `@maplibre/react-native-maplibre-gl` must be installed and the app rebuilt (dev build) for native map to work.
-  const mapRef = useRef<any | null>(null);
-
-  const centerMapOnUser = () => {
-    if (!mapRef.current || !currentLocation) return;
-    mapRef.current.animateToRegion({
-      latitude: currentLocation.latitude,
-      longitude: currentLocation.longitude,
-      latitudeDelta: 0.01,
-      longitudeDelta: 0.01,
-    }, 700);
-  };
-
-  const readyToRenderMap = canUseGoong && !!MapLibreGL;
-
-  return (
     <View style={styles.container}>
-      {readyToRenderMap ? (
-        centerCoordinate ? (
-          <>
-            <MapLibreGL.MapView
-              ref={(r: any) => { mapRef.current = r; }}
-              style={styles.map}
-              logoEnabled={false}
-            >
-              <MapLibreGL.Camera
-                centerCoordinate={[centerCoordinate[0], centerCoordinate[1]]}
-                zoomLevel={15}
-              />
+      <Map
+        style={styles.map}
+        mapStyle={GOONG_STYLE_URL}
+        onDidFinishLoadingStyle={() => setMapStyleLoaded(true)}
+        onDidFailLoadingMap={() => {
+          setMapStyleLoaded(false);
+          setErrorMessage('Không thể tải Goong Map. Hãy kiểm tra MAPTILES key và kết nối mạng.');
+        }}
+      >
+        <Camera
+          ref={cameraRef}
+          initialViewState={{ center: currentCoordinate, zoom: 14 }}
+        />
 
-              {/* Goong raster tiles via RasterSource + RasterLayer */}
-              {GOONG_MAPTILES_KEY ? (
-                <MapLibreGL.RasterSource
-                  id="goongTiles"
-                  tileSize={256}
-                  tileUrlTemplates={[`https://tile.goong.io/1.0.0/{z}/{x}/{y}.png?api_key=${GOONG_MAPTILES_KEY}`]}
-                >
-                  <MapLibreGL.RasterLayer id="goongLayer" sourceID="goongTiles" />
-                </MapLibreGL.RasterSource>
-              ) : null}
+        {orderCoordinate && (
+          <Marker id="selected-order" lngLat={orderCoordinate} anchor="bottom">
+            <View style={styles.orderMarker}>
+              <Ionicons name="location" size={32} color="#dc2626" />
+            </View>
+          </Marker>
+        )}
 
-              {/* Markers */}
-              {selectedOrderCoordinate && (
-                <MapLibreGL.PointAnnotation id={`order-${selectedOrderID ?? 'o'}`} coordinate={[selectedOrderCoordinate[0], selectedOrderCoordinate[1]]}>
-                  <View style={styles.orderMarker}><View style={styles.marker}><View style={styles.markerDot} /></View></View>
-                </MapLibreGL.PointAnnotation>
-              )}
-              {selectedDriverCoordinate && (
-                <MapLibreGL.PointAnnotation id={`driver-${selectedDriverID ?? 'd'}`} coordinate={[selectedDriverCoordinate[0], selectedDriverCoordinate[1]]}>
-                  <View style={styles.driverMarker}><View style={[styles.marker, { backgroundColor: '#000', width: 28, height: 28 }]} /></View>
-                </MapLibreGL.PointAnnotation>
-              )}
+        {visibleDriverCoordinate && (
+          <Marker id="selected-driver" lngLat={visibleDriverCoordinate} anchor="bottom">
+            <View style={styles.driverMarker}>
+              <Ionicons name="car-sport" size={22} color="#ffffff" />
+            </View>
+          </Marker>
+        )}
 
-              {/* Route polyline via ShapeSource + LineLayer */}
-              {routeCoordinates && (
-                <MapLibreGL.ShapeSource id="routeSource" shape={{ type: 'Feature', geometry: { type: 'LineString', coordinates: routeCoordinates } }}>
-                  <MapLibreGL.LineLayer id="routeLine" style={{ lineColor: '#2563eb', lineWidth: 4 }} />
-                </MapLibreGL.ShapeSource>
-              )}
-            </MapLibreGL.MapView>
-          {/* Floating Action Button */}
-          <TouchableOpacity 
-            style={styles.locationButton} 
-            activeOpacity={0.7}
-            onPress={centerMapOnUser}
+        {visibleRoute && visibleRoute.coordinates.length > 1 && (
+          <GeoJSONSource
+            id="selected-route"
+            data={{
+              type: 'Feature',
+              properties: {},
+              geometry: { type: 'LineString', coordinates: visibleRoute.coordinates },
+            }}
           >
-            <Ionicons name="locate" size={24} color="#2563eb" />
-          </TouchableOpacity>
-          <View style={[styles.topRightPanel, { top: insets.top - 30 }]}>
-            {viewMode === 'order' ? (
-              <>
-                <Text style={styles.panelTitle}>Danh sách khách hàng đã lên đơn hàng:</Text>
-                {loading ? (
-                  <Text style={styles.emptyText}>Đang tải...</Text>
-                ) : orders.length > 0 ? (
-                  orders.map(renderOrderRow)
-                ) : (
-                  <Text style={styles.emptyText}>Chưa có đơn hàng đang vận chuyển</Text>
-                )}
-              </>
-            ) : (
-              <>
-                <View style={styles.driverPanelHeader}>
-                  <TouchableOpacity onPress={() => { setViewMode('order'); setSelectedDriverID(null); }} style={styles.backButton}>
-                    <Ionicons name="arrow-back" size={16} color="#2563eb" />
-                  </TouchableOpacity>
-                  <Text style={styles.panelTitle}>Danh sách tài xế:</Text>
-                </View>
-                {loading ? (
-                  <Text style={styles.emptyText}>Đang tải...</Text>
-                ) : drivers.length > 0 ? (
-                  drivers.map(renderDriverRow)
-                ) : (
-                  <Text style={styles.emptyText}>Chưa có tài xế</Text>
-                )}
-              </>
-            )}
-          </View>
-          {viewMode === 'order' && selectedOrderID !== null && renderOrderDriver(selectedOrderID)}
-          {viewMode === 'driver' && selectedDriverID !== null && renderDriverDetail(selectedDriverID)}
-          </> 
-        ) : null
-      ) : (
-        <View style={styles.missingTokenContainer}>
-          <Text style={styles.missingTokenTitle}>
-            {Platform.OS === 'android' && !ANDROID_GOOGLE_MAPS_KEY
-              ? 'Google Maps API key not found'
-              : IS_EXPO_GO
-                ? 'Goong map cần Development Build'
-                : 'Goong map chưa được cấu hình'}
-          </Text>
-          <Text style={styles.missingTokenText}>
-            {Platform.OS === 'android' && !ANDROID_GOOGLE_MAPS_KEY
-              ? 'Set EXPO_PUBLIC_GOOGLE_MAPS_API_KEY and rebuild a development client (or use an emulator image with Google Play services).'
-              : IS_EXPO_GO
-                ? 'Bạn đang mở ứng dụng bằng Expo Go. Hãy dùng development build để hiển thị Goong map.'
-                : 'Thêm EXPO_PUBLIC_GOONG_MAPTILES_KEY vào môi trường để hiển thị bản đồ.'}
-          </Text>
-        </View>
+            <Layer
+              id="selected-route-line"
+              type="line"
+              paint={{
+                'line-color': '#2563eb',
+                'line-width': 5,
+                'line-opacity': 0.9,
+              }}
+            />
+          </GeoJSONSource>
+        )}
+      </Map>
+
+      {!trackingSession && (
+        <OrdersPanel
+          loading={loadingData}
+          orders={orders}
+          selectedOrderID={selectedOrder?.OrderID ?? null}
+          top={Math.max(insets.top + 8, 16)}
+          onSelect={(order) => void handleSelectOrder(order)}
+        />
       )}
 
-      {loading && (
-        <View style={styles.fullscreenLoader}>
-          <ActivityIndicator size="large" color="#000" />
-          <Text style={styles.overlayText}>Đang lấy vị trí hiện tại...</Text>
+      {selectedOrder && !trackingSession && (
+        <DriverSelectPanel
+          order={selectedOrder}
+          drivers={drivers}
+          selectedDriver={selectedDriver}
+          dropdownOpen={dropdownOpen}
+          geocoding={geocoding}
+          routing={routing}
+          assigning={assigning}
+          route={route}
+          onToggleDropdown={() => setDropdownOpen((open) => !open)}
+          onSelectDriver={(driver) => void handleSelectDriver(driver)}
+          onAssign={() => void handleAssignDriver()}
+          onClose={closeSelection}
+        />
+      )}
+
+      {trackingSession && (
+        <TrackingPanel session={trackingSession} onClose={closeSelection} />
+      )}
+
+      <TouchableOpacity
+        style={[styles.locationButton, selectedOrder && styles.locationButtonRaised]}
+        onPress={centerOnCurrentLocation}
+        activeOpacity={0.75}
+      >
+        <Ionicons name="locate" size={24} color="#2563eb" />
+      </TouchableOpacity>
+
+      {!mapStyleLoaded && (
+        <View style={styles.mapLoadingBadge}>
+          <ActivityIndicator size="small" color="#2563eb" />
+          <Text style={styles.mapLoadingText}>Đang tải Goong Map...</Text>
         </View>
       )}
 
       {!!errorMessage && (
-        <View style={styles.banner}>
-          <Text style={styles.bannerText}>{errorMessage}</Text>
+        <View style={[styles.errorBanner, selectedOrder && styles.errorBannerRaised]}>
+          <Text style={styles.errorText}>{errorMessage}</Text>
         </View>
       )}
     </View>
   );
 }
 
+function OrdersPanel({ loading, orders, selectedOrderID, top, onSelect }: OrdersPanelProps) {
+  return (
+    <View style={[styles.ordersPanel, { top }]}>
+      <View style={styles.panelTitleRow}>
+        <Text style={styles.panelTitle}>Đơn hàng chờ phân công</Text>
+        {USE_MOCK_BUSINESS_APIS && <Text style={styles.mockBadge}>MOCK</Text>}
+      </View>
+      {loading ? (
+        <View style={styles.inlineLoading}>
+          <ActivityIndicator size="small" color="#2563eb" />
+          <Text style={styles.mutedText}>Đang tải...</Text>
+        </View>
+      ) : orders.length === 0 ? (
+        <Text style={styles.emptyText}>Chưa có đơn hàng</Text>
+      ) : (
+        <ScrollView style={styles.ordersScroll} nestedScrollEnabled>
+          {orders.map((order) => {
+            const selected = order.OrderID === selectedOrderID;
+            return (
+              <TouchableOpacity
+                key={order.OrderID}
+                style={[styles.orderRow, selected && styles.selectedRow]}
+                onPress={() => onSelect(order)}
+              >
+                <Text style={[styles.orderTitle, selected && styles.selectedRowText]}>
+                  #{order.OrderID} · {order.organization || order.sender_name || 'Khách hàng'}
+                </Text>
+                <Text style={styles.orderAddress} numberOfLines={1}>
+                  {order.sender_address || 'Chưa có địa chỉ'}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      )}
+    </View>
+  );
+}
+
+function DriverSelectPanel({
+  order,
+  drivers,
+  selectedDriver,
+  dropdownOpen,
+  geocoding,
+  routing,
+  assigning,
+  route,
+  onToggleDropdown,
+  onSelectDriver,
+  onAssign,
+  onClose,
+}: DriverSelectPanelProps) {
+  return (
+    <View style={styles.selectionPanel}>
+      <View style={styles.selectionHeader}>
+        <View style={styles.flexOne}>
+          <Text style={styles.selectionEyebrow}>ĐƠN HÀNG #{order.OrderID}</Text>
+          <Text style={styles.selectionTitle} numberOfLines={1}>
+            {order.organization || order.sender_name || 'Khách hàng'}
+          </Text>
+        </View>
+        <TouchableOpacity style={styles.closeButton} onPress={onClose}>
+          <Ionicons name="close" size={22} color="#64748b" />
+        </TouchableOpacity>
+      </View>
+
+      <Text style={styles.fieldLabel}>Chọn tài xế</Text>
+      <TouchableOpacity style={styles.selectControl} onPress={onToggleDropdown}>
+        <View style={styles.flexOne}>
+          <Text style={selectedDriver ? styles.selectValue : styles.selectPlaceholder}>
+            {selectedDriver?.driver_name || 'Chọn tài xế phù hợp'}
+          </Text>
+          {!!selectedDriver && (
+            <Text style={styles.selectMeta}>
+              {selectedDriver.driver_license_plate_number || 'Chưa có biển số'}
+            </Text>
+          )}
+        </View>
+        <Ionicons name={dropdownOpen ? 'chevron-up' : 'chevron-down'} size={20} color="#64748b" />
+      </TouchableOpacity>
+
+      {dropdownOpen && (
+        <View style={styles.dropdown}>
+          <ScrollView style={styles.dropdownScroll} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+            {drivers.length === 0 ? (
+              <Text style={styles.emptyText}>Chưa có tài xế</Text>
+            ) : (
+              drivers.map((driver) => (
+                <TouchableOpacity
+                  key={driver.DriverIDs}
+                  style={styles.driverOption}
+                  onPress={() => onSelectDriver(driver)}
+                >
+                  <View style={styles.driverOptionIcon}>
+                    <Ionicons name="car-sport" size={17} color="#2563eb" />
+                  </View>
+                  <View style={styles.flexOne}>
+                    <Text style={styles.driverOptionName}>{driver.driver_name || 'Tài xế'}</Text>
+                    <Text style={styles.driverOptionMeta} numberOfLines={1}>
+                      {driver.driver_license_plate_number || 'Chưa có biển số'} · {driver.driver_link || 'Chưa có địa chỉ'}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              ))
+            )}
+          </ScrollView>
+        </View>
+      )}
+
+      <View style={styles.routeStatus}>
+        {geocoding || routing ? (
+          <>
+            <ActivityIndicator size="small" color="#2563eb" />
+            <Text style={styles.routeStatusText}>
+              {geocoding ? 'Đang xác định tọa độ...' : 'Đang tạo tuyến đường...'}
+            </Text>
+          </>
+        ) : route ? (
+          <>
+            <Ionicons name="navigate" size={18} color="#16a34a" />
+            <Text style={styles.routeStatusText}>
+              Tuyến đường sẵn sàng
+              {route.distanceText ? ` · ${route.distanceText}` : ''}
+              {route.durationText ? ` · ${route.durationText}` : ''}
+            </Text>
+          </>
+        ) : (
+          <>
+            <Ionicons name="information-circle-outline" size={18} color="#64748b" />
+            <Text style={styles.routeStatusText}>Chọn tài xế để hiển thị marker và tuyến đường</Text>
+          </>
+        )}
+      </View>
+
+      <TouchableOpacity
+        style={[styles.assignButton, (!selectedDriver || !route || assigning) && styles.disabledButton]}
+        onPress={onAssign}
+        disabled={!selectedDriver || !route || assigning}
+      >
+        {assigning ? (
+          <ActivityIndicator size="small" color="#ffffff" />
+        ) : (
+          <>
+            <Ionicons name="checkmark-circle" size={20} color="#ffffff" />
+            <Text style={styles.assignButtonText}>Xác nhận phân công</Text>
+          </>
+        )}
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+function TrackingPanel({ session, onClose }: TrackingPanelProps) {
+  const completed = session.status === 'Đã đến điểm lấy';
+  const progressPercent = Math.round(session.progress * 100);
+  const progressWidth = `${progressPercent}%` as `${number}%`;
+
+  return (
+    <View style={styles.selectionPanel}>
+      <View style={styles.selectionHeader}>
+        <View style={styles.flexOne}>
+          <Text style={styles.selectionEyebrow}>THEO DÕI ĐƠN HÀNG #{session.order.OrderID}</Text>
+          <Text style={styles.selectionTitle} numberOfLines={1}>
+            {session.driver.driver_name || 'Tài xế'}
+          </Text>
+          <Text style={styles.trackingPlate}>
+            {session.driver.driver_license_plate_number || 'Chưa có biển số'}
+          </Text>
+        </View>
+        <TouchableOpacity style={styles.closeButton} onPress={onClose}>
+          <Ionicons name="close" size={22} color="#64748b" />
+        </TouchableOpacity>
+      </View>
+
+      <View style={[styles.trackingStatusBadge, completed && styles.trackingCompleteBadge]}>
+        <Ionicons
+          name={completed ? 'checkmark-circle' : 'navigate'}
+          size={18}
+          color={completed ? '#15803d' : '#1d4ed8'}
+        />
+        <Text style={[styles.trackingStatusText, completed && styles.trackingCompleteText]}>
+          {session.status}
+        </Text>
+      </View>
+
+      <View style={styles.trackingRouteRow}>
+        <View style={styles.trackingPoint}>
+          <Ionicons name="car-sport" size={16} color="#ffffff" />
+        </View>
+        <View style={styles.trackingRouteLine} />
+        <Ionicons name="location" size={25} color="#dc2626" />
+        <View style={styles.flexOne}>
+          <Text style={styles.trackingDestinationLabel}>Điểm lấy hàng</Text>
+          <Text style={styles.trackingDestination} numberOfLines={1}>
+            {session.order.sender_address || 'Chưa có địa chỉ'}
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.progressHeader}>
+        <Text style={styles.progressLabel}>Tiến độ mô phỏng</Text>
+        <Text style={styles.progressValue}>{progressPercent}%</Text>
+      </View>
+      <View style={styles.progressTrack}>
+        <View style={[styles.progressFill, { width: progressWidth }]} />
+      </View>
+
+      <View style={styles.trackingMetrics}>
+        <TrackingMetric label="Còn lại" value={formatDistance(session.remainingDistanceMeters)} />
+        <View style={styles.metricDivider} />
+        <TrackingMetric label="ETA mô phỏng" value={formatEta(session.etaSeconds)} />
+        <View style={styles.metricDivider} />
+        <TrackingMetric label="Tiến độ" value={`${progressPercent}%`} />
+      </View>
+
+      {completed ? (
+        <TouchableOpacity style={styles.finishButton} onPress={onClose}>
+          <Ionicons name="flag" size={19} color="#ffffff" />
+          <Text style={styles.assignButtonText}>Kết thúc mô phỏng</Text>
+        </TouchableOpacity>
+      ) : (
+        <View style={styles.autoTrackingHint}>
+          <ActivityIndicator size="small" color="#2563eb" />
+          <Text style={styles.autoTrackingText}>Marker tài xế đang tự động di chuyển theo tuyến</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+function TrackingMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.metricItem}>
+      <Text style={styles.metricValue}>{value}</Text>
+      <Text style={styles.metricLabel}>{label}</Text>
+    </View>
+  );
+}
+
+async function fetchOrders(): Promise<Order[]> {
+  if (USE_MOCK_BUSINESS_APIS) {
+    const payload = await mockApiResponse(MOCK_ORDERS_RESPONSE);
+    return payload.data;
+  }
+
+  const response = await fetch(API_ENDPOINTS.ordersByStatus, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ shipping_status: 'Đã tiếp nhận' }),
+  });
+  const payload = await parseResponse(response);
+  if (!response.ok) throw new Error(payload?.message || 'Không thể tải đơn hàng');
+  return Array.isArray(payload?.data) ? payload.data : Array.isArray(payload) ? payload : [];
+}
+
+async function fetchDrivers(): Promise<Driver[]> {
+  if (USE_MOCK_BUSINESS_APIS) {
+    const payload = await mockApiResponse(MOCK_DRIVERS_RESPONSE);
+    return payload.data;
+  }
+
+  const response = await fetch(API_ENDPOINTS.drivers);
+  const payload = await parseResponse(response);
+  if (!response.ok) throw new Error(payload?.message || 'Không thể tải tài xế');
+  return Array.isArray(payload?.data) ? payload.data : [];
+}
+
+async function assignDriverToOrder(driverID: number, orderID: number) {
+  if (USE_MOCK_BUSINESS_APIS) {
+    await mockApiResponse({
+      data: { DriverIDs: driverID, OrderIDs: [orderID] },
+      message: 'Phân công tài xế thành công',
+    });
+    return;
+  }
+
+  const response = await fetch(API_ENDPOINTS.assignDriver, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ DriverIDs: driverID, OrderIDs: [orderID] }),
+  });
+  const payload = await parseResponse(response);
+  if (!response.ok) throw new Error(payload?.message || 'Không thể phân công tài xế');
+}
+
+async function geocodeAddress(address: string): Promise<Coordinate | null> {
+  const response = await fetch(
+    `https://rsapi.goong.io/Geocode?address=${encodeURIComponent(address)}&api_key=${encodeURIComponent(GOONG_API_KEY)}`,
+  );
+  const payload = await parseResponse(response);
+  if (!response.ok) throw new Error(payload?.message || 'Goong Geocode thất bại');
+
+  const location = payload?.results?.[0]?.geometry?.location;
+  return location ? [location.lng, location.lat] : null;
+}
+
+async function fetchDrivingRoute(
+  from: Coordinate,
+  to: Coordinate,
+  signal: AbortSignal,
+): Promise<RouteResult> {
+  const response = await fetch(
+    `https://rsapi.goong.io/direction?origin=${from[1]},${from[0]}&destination=${to[1]},${to[0]}&vehicle=car&api_key=${encodeURIComponent(GOONG_API_KEY)}`,
+    { signal },
+  );
+  const payload = await parseResponse(response);
+  if (!response.ok) throw new Error(payload?.message || 'Goong Directions thất bại');
+
+  const firstRoute = payload?.routes?.[0];
+  if (!firstRoute) throw new Error('Không tìm thấy tuyến đường');
+
+  const coordinates: Coordinate[] = firstRoute.geometry?.coordinates
+    ?? (firstRoute.overview_polyline?.points
+      ? decodePolyline(firstRoute.overview_polyline.points)
+      : []);
+  if (coordinates.length < 2) throw new Error('Tuyến đường không có geometry hợp lệ');
+
+  const firstLeg = firstRoute.legs?.[0];
+  return {
+    coordinates,
+    distanceText: firstLeg?.distance?.text,
+    durationText: firstLeg?.duration?.text,
+  };
+}
+
+function decodePolyline(encoded: string): Coordinate[] {
+  const coordinates: Coordinate[] = [];
+  let index = 0;
+  let latitude = 0;
+  let longitude = 0;
+
+  while (index < encoded.length) {
+    const latitudeChunk = decodePolylineChunk(encoded, index);
+    index = latitudeChunk.nextIndex;
+    latitude += latitudeChunk.delta;
+
+    const longitudeChunk = decodePolylineChunk(encoded, index);
+    index = longitudeChunk.nextIndex;
+    longitude += longitudeChunk.delta;
+
+    coordinates.push([longitude * 1e-5, latitude * 1e-5]);
+  }
+
+  return coordinates;
+}
+
+function decodePolylineChunk(encoded: string, startIndex: number) {
+  let index = startIndex;
+  let result = 0;
+  let shift = 0;
+  let byte: number;
+
+  do {
+    byte = encoded.charCodeAt(index++) - 63;
+    result |= (byte & 0x1f) << shift;
+    shift += 5;
+  } while (byte >= 0x20);
+
+  return {
+    delta: (result & 1) !== 0 ? ~(result >> 1) : result >> 1,
+    nextIndex: index,
+  };
+}
+
+async function parseResponse(response: Response): Promise<any> {
+  const contentType = response.headers.get('content-type') ?? '';
+  if (!contentType.includes('application/json')) {
+    throw new Error('Máy chủ trả về dữ liệu không phải JSON');
+  }
+  return response.json();
+}
+
+function mockApiResponse<T>(payload: T, delay = 350): Promise<T> {
+  return new Promise((resolve) => {
+    setTimeout(() => resolve(payload), delay);
+  });
+}
+
+function buildRouteMetrics(coordinates: Coordinate[]): RouteMetrics {
+  const cumulativeDistances = [0];
+  let totalDistanceMeters = 0;
+
+  for (let index = 1; index < coordinates.length; index += 1) {
+    totalDistanceMeters += distanceBetweenCoordinates(coordinates[index - 1], coordinates[index]);
+    cumulativeDistances.push(totalDistanceMeters);
+  }
+
+  return { coordinates, cumulativeDistances, totalDistanceMeters };
+}
+
+function interpolateRouteCoordinate(metrics: RouteMetrics, progress: number): Coordinate {
+  const safeProgress = Math.max(0, Math.min(progress, 1));
+  if (safeProgress === 0) return metrics.coordinates[0];
+  if (safeProgress === 1) return metrics.coordinates[metrics.coordinates.length - 1];
+
+  const targetDistance = metrics.totalDistanceMeters * safeProgress;
+  let low = 1;
+  let high = metrics.cumulativeDistances.length - 1;
+
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (metrics.cumulativeDistances[middle] < targetDistance) low = middle + 1;
+    else high = middle;
+  }
+
+  const endIndex = low;
+  const startIndex = endIndex - 1;
+  const segmentStart = metrics.cumulativeDistances[startIndex];
+  const segmentLength = metrics.cumulativeDistances[endIndex] - segmentStart;
+  const segmentProgress = segmentLength > 0
+    ? (targetDistance - segmentStart) / segmentLength
+    : 0;
+  const start = metrics.coordinates[startIndex];
+  const end = metrics.coordinates[endIndex];
+
+  return [
+    start[0] + (end[0] - start[0]) * segmentProgress,
+    start[1] + (end[1] - start[1]) * segmentProgress,
+  ];
+}
+
+function distanceBetweenCoordinates(from: Coordinate, to: Coordinate) {
+  const earthRadiusMeters = 6_371_000;
+  const latitudeDelta = degreesToRadians(to[1] - from[1]);
+  const longitudeDelta = degreesToRadians(to[0] - from[0]);
+  const fromLatitude = degreesToRadians(from[1]);
+  const toLatitude = degreesToRadians(to[1]);
+  const haversine =
+    Math.sin(latitudeDelta / 2) ** 2
+    + Math.cos(fromLatitude) * Math.cos(toLatitude) * Math.sin(longitudeDelta / 2) ** 2;
+
+  return earthRadiusMeters * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
+
+function degreesToRadians(value: number) {
+  return value * Math.PI / 180;
+}
+
+function formatDistance(distanceMeters: number) {
+  if (distanceMeters >= 1000) return `${(distanceMeters / 1000).toFixed(1)} km`;
+  return `${Math.max(0, Math.round(distanceMeters))} m`;
+}
+
+function formatEta(seconds: number) {
+  const safeSeconds = Math.max(0, Math.ceil(seconds));
+  if (safeSeconds < 60) return `${safeSeconds}s`;
+  return `${Math.floor(safeSeconds / 60)}m ${safeSeconds % 60}s`;
+}
+
 const styles = StyleSheet.create({
-  container: {
+  container: { flex: 1, backgroundColor: '#e5e7eb' },
+  map: { width: '100%', height: '100%', backgroundColor: '#e5e7eb' },
+  flexOne: { flex: 1 },
+  unavailableContainer: {
     flex: 1,
-  },
-  map: {
-    width: "100%",
-    height: "100%",
-  },
-  missingTokenContainer: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 24,
-    backgroundColor: "#eef6ff",
-  },
-  missingTokenTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#0f172a",
-    marginBottom: 8,
-  },
-  missingTokenText: {
-    textAlign: "center",
-    color: "#334155",
-    lineHeight: 20,
-  },
-  marker: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: "#2563eb",
-    borderWidth: 3,
-    borderColor: "#fff",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  markerDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: "#fff",
-  },  orderMarker: {
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: 24,
+    backgroundColor: '#eef6ff',
   },
+  unavailableTitle: { fontSize: 18, fontWeight: '700', color: '#0f172a', marginBottom: 8 },
+  unavailableText: { textAlign: 'center', color: '#475569', lineHeight: 20 },
+  orderMarker: { alignItems: 'center', justifyContent: 'center' },
   driverMarker: {
     width: 40,
     height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
-  },  
-  fullscreenLoader: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: "rgba(255,255,255,0.95)",
-    alignItems: "center",
-    justifyContent: "center",
+    backgroundColor: '#111827',
+    borderWidth: 3,
+    borderColor: '#ffffff',
   },
-  overlayText: {
-    marginTop: 8,
-    color: "#111",
-    fontWeight: "600",
-  },
-  banner: {
-    position: "absolute",
-    bottom: 16,
-    left: 16,
-    right: 16,
-    backgroundColor: "rgba(220,53,69,0.95)",
-    padding: 10,
-    borderRadius: 10,
-  },
-  bannerText: {
-    color: "#fff",
-    textAlign: "center",
-    fontWeight: "600",
-  },
-  // ... your existing styles
-  locationButton: {
+  ordersPanel: {
     position: 'absolute',
-    bottom: 360, // Adjusted so it doesn't cover your error banner
-    right: 20,
-    backgroundColor: '#fff',
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 5, // Android shadow
-    shadowColor: '#000', // iOS shadow
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-  },
-  topRightPanel: {
-    position: 'absolute',
-    right: 15,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)', // Slightly transparent
+    right: 14,
+    width: 230,
+    maxHeight: 230,
     padding: 12,
-    borderRadius: 12,
-    width: 200,
-    // Shadow/Elevation
-    elevation: 4,
-    shadowColor: '#000',
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    elevation: 5,
+    shadowColor: '#000000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    zIndex: 10,
+    shadowOpacity: 0.14,
+    shadowRadius: 5,
   },
-  panelTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#1e293b',
-    marginBottom: 4,
+  panelTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 7 },
+  panelTitle: { flex: 1, fontSize: 14, fontWeight: '700', color: '#0f172a' },
+  mockBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    backgroundColor: '#fef3c7',
+    color: '#92400e',
+    fontSize: 9,
+    fontWeight: '800',
   },
-  divider: {
-    height: 1,
-    backgroundColor: '#e2e8f0',
-    marginVertical: 6,
-  },
-  panelContent: {
-    fontSize: 12,
-    color: '#64748b',
-    fontFamily: 'System',
-  },
-  emptyText: {
-    fontSize: 12,
-    color: '#94a3b8',
-    textAlign: 'center',
-    marginTop: 4,
-  },
-  bottomPanel: {
+  ordersScroll: { maxHeight: 180 },
+  orderRow: { paddingVertical: 8, borderTopWidth: 1, borderTopColor: '#e2e8f0' },
+  selectedRow: { backgroundColor: '#eff6ff', marginHorizontal: -6, paddingHorizontal: 6 },
+  orderTitle: { fontSize: 12, fontWeight: '600', color: '#334155' },
+  selectedRowText: { color: '#1d4ed8' },
+  orderAddress: { marginTop: 2, fontSize: 10, color: '#94a3b8' },
+  mutedText: { fontSize: 12, color: '#64748b' },
+  emptyText: { paddingVertical: 10, textAlign: 'center', fontSize: 12, color: '#94a3b8' },
+  inlineLoading: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 8 },
+  selectionPanel: {
     position: 'absolute',
-    bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: '#fff',
+    bottom: 0,
+    paddingHorizontal: 18,
+    paddingTop: 14,
+    paddingBottom: 26,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    paddingBottom: 30,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 12,
+    backgroundColor: '#ffffff',
     elevation: 16,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.14,
+    shadowRadius: 12,
   },
-  dragHandle: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#e2e8f0',
-    alignSelf: 'center',
-    marginTop: 10,
-    marginBottom: 4,
-  },
-  panelHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  selectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  selectionEyebrow: { fontSize: 10, fontWeight: '700', color: '#2563eb', letterSpacing: 0.7 },
+  selectionTitle: { marginTop: 2, fontSize: 17, fontWeight: '700', color: '#0f172a' },
+  closeButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 14,
+    justifyContent: 'center',
+    backgroundColor: '#f1f5f9',
+  },
+  fieldLabel: { marginBottom: 6, fontSize: 12, fontWeight: '700', color: '#334155' },
+  selectControl: {
+    minHeight: 54,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    borderRadius: 12,
+    backgroundColor: '#ffffff',
+  },
+  selectPlaceholder: { fontSize: 14, color: '#94a3b8' },
+  selectValue: { fontSize: 14, fontWeight: '700', color: '#0f172a' },
+  selectMeta: { marginTop: 2, fontSize: 11, color: '#64748b' },
+  dropdown: {
+    marginTop: 6,
+    maxHeight: 170,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 12,
+    backgroundColor: '#ffffff',
+  },
+  dropdownScroll: { maxHeight: 170 },
+  driverOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: '#f1f5f9',
   },
-  panelHeaderTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#0f172a',
-  },
-  closeButton: {
+  driverOptionIcon: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: '#f1f5f9',
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: '#eff6ff',
   },
-  panelBody: {
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    maxHeight: 240,
-  },
-  orderName: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#0f172a',
-    marginBottom: 10,
-  },
-  infoRow: {
+  driverOptionName: { fontSize: 13, fontWeight: '700', color: '#1e293b' },
+  driverOptionMeta: { marginTop: 2, fontSize: 10, color: '#64748b' },
+  routeStatus: {
+    minHeight: 38,
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-    marginBottom: 4,
-  },
-  infoText: {
-    flex: 1,
-    fontSize: 14,
-    color: '#475569',
-    lineHeight: 20,
-  },
-  infoDivider: {
-    height: 1,
-    backgroundColor: '#f1f5f9',
-    marginVertical: 14,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    backgroundColor: '#f8fafc',
-    borderRadius: 12,
-    paddingVertical: 14,
-    marginBottom: 8,
-  },
-  statItem: {
-    flex: 1,
     alignItems: 'center',
+    gap: 8,
+    marginTop: 10,
+    paddingHorizontal: 10,
+    borderRadius: 9,
+    backgroundColor: '#f8fafc',
   },
-  statDivider: {
-    width: 1,
+  routeStatusText: { flex: 1, fontSize: 11, color: '#475569' },
+  trackingPlate: { marginTop: 2, fontSize: 11, color: '#64748b' },
+  trackingStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 7,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderRadius: 18,
+    backgroundColor: '#dbeafe',
+  },
+  trackingCompleteBadge: { backgroundColor: '#dcfce7' },
+  trackingStatusText: { fontSize: 12, fontWeight: '700', color: '#1d4ed8' },
+  trackingCompleteText: { color: '#15803d' },
+  trackingRouteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 13,
+    paddingVertical: 9,
+  },
+  trackingPoint: {
+    width: 31,
+    height: 31,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#111827',
+  },
+  trackingRouteLine: { width: 28, height: 3, marginHorizontal: 5, backgroundColor: '#93c5fd' },
+  trackingDestinationLabel: { fontSize: 10, fontWeight: '700', color: '#64748b' },
+  trackingDestination: { marginTop: 2, fontSize: 11, color: '#1e293b' },
+  progressHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 2,
+  },
+  progressLabel: { fontSize: 11, fontWeight: '600', color: '#475569' },
+  progressValue: { fontSize: 12, fontWeight: '800', color: '#2563eb' },
+  progressTrack: {
+    height: 8,
+    marginTop: 6,
+    overflow: 'hidden',
+    borderRadius: 4,
     backgroundColor: '#e2e8f0',
   },
-  statLabel: {
-    fontSize: 11,
-    color: '#94a3b8',
-    marginBottom: 4,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+  progressFill: { height: '100%', borderRadius: 4, backgroundColor: '#2563eb' },
+  trackingMetrics: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 13,
+    paddingVertical: 10,
+    borderRadius: 11,
+    backgroundColor: '#f8fafc',
   },
-  statValue: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#0f172a',
-  },
-  panelFooter: {
-    paddingHorizontal: 20,
-    paddingTop: 12,
-  },
-  submitButton: {
-    backgroundColor: '#16a34a',
+  metricItem: { flex: 1, alignItems: 'center' },
+  metricValue: { fontSize: 13, fontWeight: '800', color: '#0f172a' },
+  metricLabel: { marginTop: 2, fontSize: 9, color: '#64748b' },
+  metricDivider: { width: 1, height: 28, backgroundColor: '#e2e8f0' },
+  autoTrackingHint: {
+    height: 46,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    paddingVertical: 16,
-    borderRadius: 14,
+    marginTop: 11,
+    borderRadius: 11,
+    backgroundColor: '#eff6ff',
   },
-  submitText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  driverPanelHeader: {
+  autoTrackingText: { fontSize: 11, fontWeight: '600', color: '#1d4ed8' },
+  finishButton: {
+    height: 48,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginBottom: 4,
-  },
-  backButton: {
-    width: 24,
-    height: 24,
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 11,
     borderRadius: 12,
-    backgroundColor: '#eff6ff',
+    backgroundColor: '#16a34a',
+  },
+  assignButton: {
+    height: 48,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 8,
+    marginTop: 10,
+    borderRadius: 12,
+    backgroundColor: '#2563eb',
   },
+  disabledButton: { backgroundColor: '#94a3b8' },
+  assignButtonText: { fontSize: 14, fontWeight: '700', color: '#ffffff' },
+  locationButton: {
+    position: 'absolute',
+    right: 18,
+    bottom: 22,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ffffff',
+    elevation: 6,
+  },
+  locationButtonRaised: { bottom: 360 },
+  mapLoadingBadge: {
+    position: 'absolute',
+    top: 16,
+    left: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    elevation: 4,
+  },
+  mapLoadingText: { fontSize: 12, fontWeight: '600', color: '#2563eb' },
+  errorBanner: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 82,
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(220,38,38,0.95)',
+  },
+  errorBannerRaised: { bottom: 360 },
+  errorText: { textAlign: 'center', fontSize: 12, fontWeight: '600', color: '#ffffff' },
 });

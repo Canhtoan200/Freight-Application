@@ -4,9 +4,9 @@ import { View, Text, StyleSheet } from 'react-native';
 export default function DriverMap() {
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Mapbox đã được bật cho mobile</Text>
+      <Text style={styles.title}>Goong Map + MapLibre đã được bật cho mobile</Text>
       <Text style={styles.text}>
-        Màn hình web đang dùng placeholder. Hãy chạy app native/dev build để xem bản đồ Mapbox.
+        Màn hình web đang dùng placeholder. Hãy chạy app native/dev build để xem Goong Map.
       </Text>
     </View>
   );
