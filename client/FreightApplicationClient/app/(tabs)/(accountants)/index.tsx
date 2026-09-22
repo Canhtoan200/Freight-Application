@@ -17,20 +17,23 @@ type Order = {
 };
 const dropdownOptions = [
     { label: 'Tất cả', value: 'all' },
-    { label: '1 tuần trước', value: '1_week_ago' },
-    { label: '1 tháng trước', value: '1_month_ago' },
-    { label: '2 tháng trước', value: '2_months_ago' },
-    { label: '1 quý trước', value: '1_quarter_ago' },
-    { label: '2 quý trước', value: '2_quarters_ago' },
-    { label: '1 năm trước', value: '1_year_ago' },
-    { label: '2 năm trước', value: '2_years_ago' },
+  { label: '1 tuần trước', value: '1 week ago' },
+  { label: '1 tháng trước', value: '1 month ago' },
+  { label: '2 tháng trước', value: '2 month ago' },
+  { label: '1 quý trước', value: '1 quarter ago' },
+  { label: '2 quý trước', value: '2 quarter ago' },
+  { label: '1 năm trước', value: '1 year ago' },
+  { label: '2 năm trước', value: '2 year ago' },
 ];
 
 export default function AccountantsHome() {
   const router = useRouter();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
-  const [value, setValue] = useState('1_week_ago');
+  const [value, setValue] = useState('1 week ago');
+  const [wagonNumber, setWagonNumber] = useState('');
+  const [senderName, setSenderName] = useState('');
+  const [receiverName, setReceiverName] = useState('');
   const [isFocus, setIsFocus] = useState(false);
 
   useEffect(() => {
@@ -48,6 +51,34 @@ export default function AccountantsHome() {
       }
     } catch (error) {
       console.error("Lỗi kết nối", "Không thể kết nối đến máy chủ");
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  };
+  const searchOrders = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch('https://freight-application-server.onrender.com/api/v1/orders/searchOrders', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          wagon_departure_date: value,
+          wagon_number: wagonNumber.trim() || null,
+          sender_name: senderName.trim() || null,
+          receiver_name: receiverName.trim() || null,
+        }),
+      });
+      const data = await response.json();
+      if (response.ok) {
+        setOrders(data.data || []);
+      } else {
+        console.error('Lỗi tìm kiếm', data.message || 'Không thể tìm kiếm đơn hàng');
+      }
+    } catch (error) {
+      console.error('Lỗi kết nối', 'Không thể kết nối đến máy chủ');
       console.error(error);
     } finally {
       setLoading(false);
@@ -133,17 +164,35 @@ export default function AccountantsHome() {
                   </View>
                   <View style={styles.searchField}>
                     <Text style={styles.searchLabel}>Số toa:</Text>
-                    <TextInput style={styles.searchInput} placeholder="Nhập số toa" placeholderTextColor="#999" />
-                  </View>
-                  <View style={styles.searchField}>
-                    <Text style={styles.searchLabel}>Chủ nhận:</Text>
-                    <TextInput style={styles.searchInput} placeholder="Nhập tên chủ nhận" placeholderTextColor="#999" />
+                    <TextInput
+                      style={styles.searchInput}
+                      placeholder="Nhập số toa"
+                      placeholderTextColor="#999"
+                      value={wagonNumber}
+                      onChangeText={setWagonNumber}
+                    />
                   </View>
                   <View style={styles.searchField}>
                     <Text style={styles.searchLabel}>Chủ gửi:</Text>
-                    <TextInput style={styles.searchInput} placeholder="Nhập tên chủ gửi" placeholderTextColor="#999" />
+                    <TextInput
+                      style={styles.searchInput}
+                      placeholder="Nhập tên chủ gửi"
+                      placeholderTextColor="#999"
+                      value={senderName}
+                      onChangeText={setSenderName}
+                    />
                   </View>
-                  <TouchableOpacity style={styles.searchButton}>
+                  <View style={styles.searchField}>
+                    <Text style={styles.searchLabel}>Chủ nhận:</Text>
+                    <TextInput
+                      style={styles.searchInput}
+                      placeholder="Nhập tên chủ nhận"
+                      placeholderTextColor="#999"
+                      value={receiverName}
+                      onChangeText={setReceiverName}
+                    />
+                  </View>
+                  <TouchableOpacity style={styles.searchButton} onPress={searchOrders}>
                     <Text style={styles.searchButtonText}>Tìm kiếm</Text>
                   </TouchableOpacity>
                 </View>
