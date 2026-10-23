@@ -1,15 +1,24 @@
 import React, { useEffect, useState } from "react";
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Alert, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { useRouter } from 'expo-router';
 import AntDesign from '@expo/vector-icons/AntDesign';
 import { Dropdown } from 'react-native-element-dropdown';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
+import * as XLSX from 'xlsx';
 
 type Order = {
   OrderID: number;
   order_name?: string;
   goods_quantity?: number;
   receiver_name?: string;
+  receiver_phone_number?: string;
+  receiver_address?: string;
+  shipping_document?: string;
   sender_name?: string;
+  wagon_departure_date?: string | Date;
+  goods_weight?: number | string;
+  goods_volume?: number | string;
   driver_name?: string;
   wagon_number?: string;
   wagon_arrival_date?: string | Date;
@@ -84,6 +93,56 @@ export default function AccountantsHome() {
       setLoading(false);
     }
   };
+  const exportExcel = async () => {
+    try {
+      const rows = orders.map((order) => ({
+        "STT": order.OrderID,
+        "Ngày tàu chạy": order.wagon_departure_date,
+        "Số toa": order.wagon_number,
+        "Tên hàng": order.order_name,
+        "Số lượng": order.goods_quantity,
+        "Khối lượng (kg)": order.goods_weight,
+        "Thể tích (m3)": order.goods_volume,
+        "Chủ gửi": order.sender_name,
+        "Chủ nhận": order.receiver_name,
+        "SĐT": order.receiver_phone_number,
+        "Địa chỉ giao": order.receiver_address,
+        "Chứng từ kèm theo": order.shipping_document,
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Đơn hàng');
+      const base64 = XLSX.write(workbook, { bookType: 'xlsx', type: 'base64' });
+      const fileName = `don-hang-${new Date().toISOString().slice(0, 10)}.xlsx`;
+
+      if (Platform.OS === 'web') {
+        const link = document.createElement('a');
+        link.href = `data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${base64}`;
+        link.download = fileName;
+        link.click();
+        return;
+      }
+
+      const fileUri = `${FileSystem.cacheDirectory}${fileName}`;
+      await FileSystem.writeAsStringAsync(fileUri, base64, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          dialogTitle: 'Lưu file Excel',
+          UTI: 'com.microsoft.excel.xlsx',
+        });
+      } else {
+        Alert.alert('Không thể chia sẻ', 'Thiết bị không hỗ trợ chia sẻ file Excel.');
+      }
+    } catch (error) {
+      console.error('Lỗi xuất file Excel:', error);
+      Alert.alert('Lỗi', 'Không thể xuất file Excel.');
+    }
+  };
   const renderOrderRow = (order: Order) => (
       <View key={order.OrderID} style={styles.tableRow}>
         <View style={[styles.commonCell, styles.cellLarge]}><Text style={styles.bodyText}>{order.order_name || 'null'}</Text></View>
@@ -124,7 +183,7 @@ export default function AccountantsHome() {
                 <TouchableOpacity style={styles.addButton}>
                   <Text style={styles.addButtonText}>Thêm đơn hàng</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.exportButton}>
+                <TouchableOpacity style={styles.exportButton} onPress={exportExcel}>
                   <Text style={styles.exportButtonText}>Xuất file excel</Text>
                 </TouchableOpacity>
               </View>
