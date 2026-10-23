@@ -126,54 +126,11 @@ const SIMULATION_TICK_MS = 500;
 const IS_EXPO_GO =
   Constants.appOwnership === 'expo' ||
   Constants.executionEnvironment === 'storeClient';
-const USE_MOCK_BUSINESS_APIS = true;
+const USE_MOCK_DRIVER_APIS = true;
 const API_ENDPOINTS = {
-  ordersByStatus: `${SERVER_URL}/orders/getAllOrderByStatus`,
+  ordersByStatus: `${SERVER_URL}/orders/getAllOrderByStatus?shipping_status=${encodeURIComponent('Đã tiếp nhận')}`,
   drivers: `${SERVER_URL}/drivers/getAllDrivers`,
   assignDriver: `${SERVER_URL}/drivers/createDriverOrderDetail`,
-};
-
-const MOCK_ORDERS_RESPONSE: { data: Order[] } = {
-  data: [
-    {
-      OrderID: 9001,
-      order_name: 'Giao linh kiện điện tử',
-      order_dispatch_date: '2026-08-16T08:00:00.000Z',
-      sender_name: 'Kho trung tâm Quận 1',
-      receiver_name: 'Cửa hàng Thủ Đức',
-      sender_address: '72 Lê Thánh Tôn, Bến Nghé, Quận 1, Thành phố Hồ Chí Minh',
-      receiver_address: '1 Võ Văn Ngân, Linh Chiểu, Thủ Đức, Thành phố Hồ Chí Minh',
-      sender_phone_number: '0900000001',
-      receiver_phone_number: '0900000002',
-      goods_quantity: 12,
-      goods_weight: '350.00',
-      goods_volume: '8.50',
-      shipping_status: 'Đã tiếp nhận',
-      shipping_position: 'Kho Quận 1',
-      shipping_payment: 'Đã thanh toán',
-      organization: 'Freight Demo Quận 1',
-      created_at: '2026-08-16T07:30:00.000Z',
-    },
-    {
-      OrderID: 9002,
-      order_name: 'Giao hàng tiêu dùng',
-      order_dispatch_date: '2026-08-16T09:00:00.000Z',
-      sender_name: 'Kho Thủ Đức',
-      receiver_name: 'Điểm nhận Dĩ An',
-      sender_address: '1 Võ Văn Ngân, Linh Chiểu, Thủ Đức, Thành phố Hồ Chí Minh',
-      receiver_address: 'An Bình, Dĩ An, Bình Dương',
-      sender_phone_number: '0900000003',
-      receiver_phone_number: '0900000004',
-      goods_quantity: 20,
-      goods_weight: '500.00',
-      goods_volume: '12.00',
-      shipping_status: 'Đã tiếp nhận',
-      shipping_position: 'Kho Thủ Đức',
-      shipping_payment: 'Chưa thanh toán',
-      organization: 'Freight Demo Thủ Đức',
-      created_at: '2026-08-16T08:15:00.000Z',
-    },
-  ],
 };
 
 const MOCK_DRIVERS_RESPONSE: { data: Driver[] } = {
@@ -635,7 +592,6 @@ function OrdersPanel({ loading, orders, selectedOrderID, top, onSelect }: Orders
     <View style={[styles.ordersPanel, { top }]}>
       <View style={styles.panelTitleRow}>
         <Text style={styles.panelTitle}>Đơn hàng chờ phân công</Text>
-        {USE_MOCK_BUSINESS_APIS && <Text style={styles.mockBadge}>MOCK</Text>}
       </View>
       {loading ? (
         <View style={styles.inlineLoading}>
@@ -871,11 +827,6 @@ function TrackingMetric({ label, value }: { label: string; value: string }) {
 }
 
 async function fetchOrders(): Promise<Order[]> {
-  if (USE_MOCK_BUSINESS_APIS) {
-    const payload = await mockApiResponse(MOCK_ORDERS_RESPONSE);
-    return payload.data;
-  }
-
   const response = await fetch(API_ENDPOINTS.ordersByStatus, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -887,7 +838,7 @@ async function fetchOrders(): Promise<Order[]> {
 }
 
 async function fetchDrivers(): Promise<Driver[]> {
-  if (USE_MOCK_BUSINESS_APIS) {
+  if (USE_MOCK_DRIVER_APIS) {
     const payload = await mockApiResponse(MOCK_DRIVERS_RESPONSE);
     return payload.data;
   }
@@ -899,7 +850,7 @@ async function fetchDrivers(): Promise<Driver[]> {
 }
 
 async function assignDriverToOrder(driverID: number, orderID: number) {
-  if (USE_MOCK_BUSINESS_APIS) {
+  if (USE_MOCK_DRIVER_APIS) {
     await mockApiResponse({
       data: { DriverIDs: driverID, OrderIDs: [orderID] },
       message: 'Phân công tài xế thành công',
@@ -1120,15 +1071,6 @@ const styles = StyleSheet.create({
   },
   panelTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 7 },
   panelTitle: { flex: 1, fontSize: 14, fontWeight: '700', color: '#0f172a' },
-  mockBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-    backgroundColor: '#fef3c7',
-    color: '#92400e',
-    fontSize: 9,
-    fontWeight: '800',
-  },
   ordersScroll: { maxHeight: 180 },
   orderRow: { paddingVertical: 8, borderTopWidth: 1, borderTopColor: '#e2e8f0' },
   selectedRow: { backgroundColor: '#eff6ff', marginHorizontal: -6, paddingHorizontal: 6 },
