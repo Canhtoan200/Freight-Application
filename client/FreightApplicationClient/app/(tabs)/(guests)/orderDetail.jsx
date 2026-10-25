@@ -2,6 +2,7 @@
 import { ScrollView, StyleSheet, Text, View, ActivityIndicator, Alert, TouchableOpacity } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function OrderDetail() {
     const router = useRouter();
@@ -25,8 +26,26 @@ export default function OrderDetail() {
             }
 
             try {
-                const response = await fetch("https://freight-application-server.onrender.com/api/v1/orders/getAllOrders");
-                const data = await response.json();
+                const rawUser = await AsyncStorage.getItem("userToken");
+                const user = rawUser ? JSON.parse(rawUser) : null;
+                if (!user?.token) {
+                    throw new Error("Vui lòng đăng nhập lại để xem chi tiết đơn hàng.");
+                }
+                const response = await fetch("https://freight-application-server.onrender.com/api/v1/orders/getOrdersForTracking", {
+                    headers: { Authorization: `Bearer ${user.token}` },
+                });
+                const body = await response.text();
+                let data = null;
+                try {
+                    data = JSON.parse(body);
+                } catch {}
+                if (!response.ok) {
+                    if (response.status === 404) {
+                        throw new Error("API theo dõi chưa được triển khai trên máy chủ.");
+                    }
+                    throw new Error(data?.message || `Máy chủ gặp lỗi HTTP ${response.status}.`);
+                }
+                if (!data) throw new Error("Máy chủ trả về dữ liệu không hợp lệ.");
                 const foundOrder = (data.data || []).find((item) => String(item.OrderID) === String(orderId));
 
                 if (foundOrder) {
@@ -36,7 +55,10 @@ export default function OrderDetail() {
                 }
             } catch (error) {
                 console.error(error);
-                Alert.alert("Lỗi kết nối", "Không thể tải chi tiết đơn hàng.");
+                Alert.alert(
+                    "Không thể tải chi tiết đơn hàng",
+                    error instanceof Error ? error.message : "Lỗi kết nối đến máy chủ.",
+                );
             } finally {
                 setLoading(false);
             }

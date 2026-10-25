@@ -1,10 +1,6 @@
-import React from "react";
-import { Text } from "react-native";
+import React from 'react';
+import DriverMapManagement from '../(admins)/DriverMapManagement';
 
-export default function TabsLayout() {
-  return (
-    <>
-      <Text>Đây là trang google map tài xế</Text>
-    </>
-  );
+export default function AccountantDriverManagement() {
+  return <DriverMapManagement readOnly />;
 }

@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   ScrollView,
@@ -22,6 +22,8 @@ type Order = {
   shipping_status?: string;
   shipping_position?: string;
   organization?: string;
+  driver_name?: string;
+  driver_license_plate?: string;
 };
 
 type Driver = {
@@ -55,6 +57,8 @@ type TrackingSession = {
 type OrdersPanelProps = {
   loading: boolean;
   orders: Order[];
+  drivers: Driver[];
+  readOnly: boolean;
   selectedOrderID: number | null;
   top: number;
   onSelect: (order: Order) => void;
@@ -80,69 +84,31 @@ type TrackingPanelProps = {
   onClose: () => void;
 };
 
+type DriverMapManagementProps = {
+  readOnly?: boolean;
+};
+
 const GOONG_MAPTILES_KEY = process.env.EXPO_PUBLIC_GOONG_MAPTILES_KEY ?? '';
 const GOONG_API_KEY = process.env.EXPO_PUBLIC_GOONG_API_KEY ?? GOONG_MAPTILES_KEY;
 const GOONG_STYLE_URL = GOONG_MAPTILES_KEY
   ? `https://tiles.goong.io/assets/goong_map_web.json?api_key=${GOONG_MAPTILES_KEY}`
   : '';
 const GOONG_DIRECTION_URL = 'https://rsapi.goong.io/direction';
-const ROUTE_START_COORDINATE: Coordinate = [106.7009, 10.7769];
-const ROUTE_END_COORDINATE: Coordinate = [106.6945, 10.7866];
+const ORDERS_BY_STATUS_URL =
+  'https://freight-application-server.onrender.com/api/v1/orders/getAllOrderByStatus';
+const DRIVERS_URL = 'https://freight-application-server.onrender.com/api/v1/drivers/getAllDrivers';
+const ASSIGN_DRIVER_URL =
+  'https://freight-application-server.onrender.com/api/v1/drivers/createDriverOrderDetail';
+const ORDERS_STATUS = 'Đã tiếp nhận';
+const ACTIVE_FLEET_STATUSES = new Set([
+  ORDERS_STATUS,
+  'Tài xế đang đi!',
+  'Đã nhận hàng',
+  'Đã tới ga',
+]);
+const DRIVER_START_ADDRESS = 'KDC Nam Thịnh, An Bình, Dĩ An, Bình Dương';
 const MAPLIBRE_JS = 'https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.js';
 const MAPLIBRE_CSS = 'https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.css';
-
-const MOCK_ORDERS: Order[] = [
-  {
-    OrderID: 9001,
-    order_name: 'Giao linh kiện điện tử',
-    sender_name: 'Kho trung tâm Quận 1',
-    receiver_name: 'Cửa hàng Thủ Đức',
-    sender_address: '72 Lê Thánh Tôn, Bến Nghé, Quận 1, Thành phố Hồ Chí Minh',
-    receiver_address: '1 Võ Văn Ngân, Linh Chiểu, Thủ Đức, Thành phố Hồ Chí Minh',
-    shipping_status: 'Đã tiếp nhận',
-    shipping_position: 'Kho Quận 1',
-    organization: 'Freight Demo Quận 1',
-  },
-  {
-    OrderID: 9002,
-    order_name: 'Giao hàng tiêu dùng',
-    sender_name: 'Kho Thủ Đức',
-    receiver_name: 'Điểm nhận Dĩ An',
-    sender_address: '1 Võ Văn Ngân, Linh Chiểu, Thủ Đức, Thành phố Hồ Chí Minh',
-    receiver_address: 'An Bình, Dĩ An, Bình Dương',
-    shipping_status: 'Đã tiếp nhận',
-    shipping_position: 'Kho Thủ Đức',
-    organization: 'Freight Demo Thủ Đức',
-  },
-];
-
-const MOCK_DRIVERS: Driver[] = [
-  {
-    DriverIDs: 1,
-    driver_name: 'Trần Văn Sơn',
-    driver_link: 'KDC Nam Thịnh, An Bình, Dĩ An, Bình Dương',
-    driver_license_plate_number: '50H 19249',
-    driver_phone_number: '0981391557',
-  },
-  {
-    DriverIDs: 2,
-    driver_name: 'Nguyễn Minh Hải',
-    driver_link: '268 Lý Thường Kiệt, Phường 14, Quận 10, Thành phố Hồ Chí Minh',
-    driver_license_plate_number: '51D 67890',
-    driver_phone_number: '0909000002',
-  },
-];
-
-const MOCK_ROUTE: RouteResult = {
-  coordinates: [
-    [106.7009, 10.7769],
-    [106.7005, 10.7789],
-    [106.6992, 10.7811],
-    [106.6945, 10.7866],
-  ],
-  distanceText: '4.2 km',
-  durationText: '12 phút',
-};
 
 const decodePolyline = (encoded: string): Coordinate[] => {
   if (!encoded) return [];
@@ -194,7 +160,13 @@ const fetchGoongDirections = async (origin: Coordinate, destination: Coordinate)
   const originStr = `${origin[1]},${origin[0]}`;
   const destinationStr = `${destination[1]},${destination[0]}`;
 
-  const url = `${GOONG_DIRECTION_URL}?origin=${originStr}&destination=${destinationStr}&vehicle=car&api_key=${apiKey}`;
+  const params = new URLSearchParams({
+    origin: originStr,
+    destination: destinationStr,
+    vehicle: 'car',
+    api_key: apiKey,
+  });
+  const url = `${GOONG_DIRECTION_URL}?${params.toString()}`;
 
   const response = await fetch(url);
   if (!response.ok) {
@@ -220,12 +192,77 @@ const fetchGoongDirections = async (origin: Coordinate, destination: Coordinate)
     ? route.legs[0].duration.value 
     : route.duration || 0;
 
+  if (decodedCoordinates.length < 2) {
+    throw new Error('Goong không trả về hình học tuyến đường hợp lệ.');
+  }
+
   return {
-    coordinates: decodedCoordinates.length > 0 ? decodedCoordinates : [origin, destination],
+    coordinates: decodedCoordinates,
     distanceText: distanceMeters > 0 ? `${(distanceMeters / 1000).toFixed(1)} km` : undefined,
     durationText: durationSeconds > 0 ? `${Math.max(1, Math.round(durationSeconds / 60))} phút` : undefined,
   };
 };
+
+async function fetchOrdersByStatus(): Promise<Order[]> {
+  const url = `${ORDERS_BY_STATUS_URL}?shipping_status=${encodeURIComponent(ORDERS_STATUS)}`;
+  const response = await fetch(url);
+  const payload = (await response.json()) as { data?: Order[]; message?: string };
+
+  if (!response.ok) {
+    throw new Error(payload.message || 'Không thể tải đơn hàng.');
+  }
+  if (!Array.isArray(payload.data)) {
+    throw new Error('Máy chủ trả về danh sách đơn hàng không hợp lệ.');
+  }
+
+  return payload.data;
+}
+
+async function fetchFleetOrders(): Promise<Order[]> {
+  const response = await fetch('https://freight-application-server.onrender.com/api/v1/orders/getAllOrders');
+  const payload = (await response.json()) as { data?: Order[]; message?: string };
+  if (!response.ok) throw new Error(payload.message || 'Không thể tải tổng quan đơn hàng.');
+  if (!Array.isArray(payload.data)) throw new Error('Máy chủ trả về danh sách đơn hàng không hợp lệ.');
+  return payload.data.filter((order) => ACTIVE_FLEET_STATUSES.has(order.shipping_status ?? ''));
+}
+
+async function fetchDrivers(): Promise<Driver[]> {
+  const response = await fetch(DRIVERS_URL);
+  const payload = (await response.json()) as { data?: Driver[]; message?: string };
+
+  if (!response.ok) {
+    throw new Error(payload.message || 'Không thể tải danh sách tài xế.');
+  }
+  if (!Array.isArray(payload.data)) {
+    throw new Error('Máy chủ trả về danh sách tài xế không hợp lệ.');
+  }
+
+  return payload.data;
+}
+
+async function geocodeAddress(address: string): Promise<Coordinate> {
+  if (!GOONG_API_KEY) {
+    throw new Error('Thiếu API key Goong để xác định vị trí địa chỉ.');
+  }
+
+  const params = new URLSearchParams({
+    address: `${address}, Việt Nam`,
+    api_key: GOONG_API_KEY,
+  });
+  const response = await fetch(`https://rsapi.goong.io/Geocode?${params.toString()}`);
+  const payload = await response.json();
+
+  if (!response.ok) {
+    throw new Error(payload?.error_message || 'Không thể xác định tọa độ địa chỉ.');
+  }
+
+  const location = payload?.results?.[0]?.geometry?.location;
+  if (typeof location?.lng !== 'number' || typeof location?.lat !== 'number') {
+    throw new Error(`Không tìm thấy tọa độ cho địa chỉ: ${address}`);
+  }
+
+  return [location.lng, location.lat];
+}
 
 const getHeading = (from: Coordinate, to: Coordinate) => {
   const deltaLng = to[0] - from[0];
@@ -273,20 +310,29 @@ const loadMapLibre = async () => {
   });
 };
 
-export default function DriverMapManagement() {
+export default function DriverMapManagement({ readOnly = false }: DriverMapManagementProps) {
   const insets = useSafeAreaInsets();
   const mapContainerRef = useRef<any>(null);
   const mapRef = useRef<any>(null);
   const truckMarkerRef = useRef<any>(null);
   const trackingTimerRef = useRef<number | null>(null);
+  const orderRequestRef = useRef(0);
+  const driverRequestRef = useRef(0);
   const [loading, setLoading] = useState(true);
+  const [ordersLoading, setOrdersLoading] = useState(true);
+  const [geocoding, setGeocoding] = useState(false);
+  const [routing, setRouting] = useState(false);
+  const [assigning, setAssigning] = useState(false);
+  const [mapReady, setMapReady] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-  const [orders, setOrders] = useState<Order[]>(MOCK_ORDERS);
-  const [drivers, setDrivers] = useState<Driver[]>(MOCK_DRIVERS);
-  const [selectedOrder, setSelectedOrder] = useState<Order | null>(MOCK_ORDERS[0]);
-  const [selectedDriver, setSelectedDriver] = useState<Driver | null>(MOCK_DRIVERS[0]);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [selectedDriver, setSelectedDriver] = useState<Driver | null>(null);
+  const [orderCoordinate, setOrderCoordinate] = useState<Coordinate | null>(null);
+  const [driverCoordinate, setDriverCoordinate] = useState<Coordinate | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [route, setRoute] = useState<RouteResult | null>(MOCK_ROUTE);
+  const [route, setRoute] = useState<RouteResult | null>(null);
   const [trackingSession, setTrackingSession] = useState<TrackingSession | null>(null);
 
   const stopTrackingTimer = () => {
@@ -308,6 +354,59 @@ export default function DriverMapManagement() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    (readOnly ? fetchFleetOrders() : fetchOrdersByStatus())
+      .then((orderList) => {
+        if (!active) return;
+        setOrders(orderList);
+        if (!readOnly && orderList[0]) void handleSelectOrder(orderList[0]);
+      })
+      .catch((error: unknown) => {
+        console.error('Không thể tải đơn hàng:', error);
+        if (active) setErrorMessage('Không thể tải danh sách đơn hàng.');
+      })
+      .finally(() => {
+        if (active) setOrdersLoading(false);
+      });
+
+    fetchDrivers()
+      .then((driverList) => {
+        if (active) setDrivers(driverList);
+      })
+      .catch((error: unknown) => {
+        console.error('Không thể tải danh sách tài xế:', error);
+        if (active) setErrorMessage('Không thể tải danh sách tài xế.');
+      });
+
+    return () => {
+      active = false;
+      orderRequestRef.current += 1;
+      driverRequestRef.current += 1;
+    };
+  }, [readOnly]);
+
+  useEffect(() => {
+    if (!readOnly) return;
+    let active = true;
+
+    geocodeAddress(DRIVER_START_ADDRESS)
+      .then((coordinate) => {
+        if (!active) return;
+        setDriverCoordinate(coordinate);
+        mapRef.current?.easeTo({ center: coordinate, zoom: 12, duration: 700 });
+      })
+      .catch((error: unknown) => {
+        console.error('Không thể xác định vị trí đội xe:', error);
+        if (active) setErrorMessage('Không thể xác định vị trí đội xe.');
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [readOnly]);
 
   useEffect(() => {
     let map: any;
@@ -344,20 +443,15 @@ export default function DriverMapManagement() {
 
         map.addControl(new maplibregl.NavigationControl({ showCompass: true, showZoom: true }), 'top-right');
 
-        new maplibregl.Marker({ color: '#2563eb' })
-          .setLngLat([106.7009, 10.7769])
-          .addTo(map);
-
         const loadTimeout = window.setTimeout(() => {
           if (mounted) setLoading(false);
         }, 5000);
 
         map.on('load', () => {
           if (mounted) {
-            setErrorMessage('');
             setLoading(false);
+            setMapReady(true);
           }
-          syncMapMarkers();
           window.clearTimeout(loadTimeout);
         });
       } catch (error: any) {
@@ -377,154 +471,220 @@ export default function DriverMapManagement() {
     };
   }, []);
 
-  const handleSelectOrder = (order: Order) => {
+  const handleSelectOrder = async (order: Order) => {
+    const requestID = ++orderRequestRef.current;
+    driverRequestRef.current += 1;
     setSelectedOrder(order);
     setSelectedDriver(null);
+    setOrderCoordinate(null);
+    setDriverCoordinate(null);
     setRoute(null);
-    setDropdownOpen(false);
-    setTrackingSession(null);
-  };
-
-  const handleSelectDriver = async (driver: Driver) => {
-    setSelectedDriver(driver);
     setDropdownOpen(false);
     setTrackingSession(null);
     setErrorMessage('');
 
+    if (!order.sender_address?.trim()) {
+      setErrorMessage(`Đơn hàng #${order.OrderID} chưa có địa chỉ người gửi.`);
+      return;
+    }
+
+    setGeocoding(true);
     try {
-      setRoute(null);
-      const nextRoute = await fetchGoongDirections(ROUTE_START_COORDINATE, ROUTE_END_COORDINATE);
+      const coordinate = await geocodeAddress(order.sender_address);
+      if (requestID !== orderRequestRef.current) return;
+
+      setOrderCoordinate(coordinate);
+      mapRef.current?.easeTo({ center: coordinate, zoom: 15, duration: 700 });
+    } catch (error: unknown) {
+      console.error('Không thể xác định vị trí người gửi:', error);
+      if (requestID === orderRequestRef.current) {
+        setErrorMessage(
+          error instanceof Error ? error.message : 'Không thể xác định vị trí người gửi.',
+        );
+      }
+    } finally {
+      if (requestID === orderRequestRef.current) setGeocoding(false);
+    }
+  };
+
+  const handleSelectDriver = async (driver: Driver) => {
+    const requestID = ++driverRequestRef.current;
+    setSelectedDriver(driver);
+    setDriverCoordinate(null);
+    setRoute(null);
+    setDropdownOpen(false);
+    setTrackingSession(null);
+    setErrorMessage('');
+
+    if (!selectedOrder?.sender_address?.trim()) {
+      setErrorMessage('Đơn hàng chưa có địa chỉ người gửi để tạo tuyến đường.');
+      return;
+    }
+
+    try {
+      setGeocoding(true);
+      setRouting(false);
+      const [driverLocation, destination] = await Promise.all([
+        geocodeAddress(DRIVER_START_ADDRESS),
+        orderCoordinate
+          ? Promise.resolve(orderCoordinate)
+          : geocodeAddress(selectedOrder.sender_address),
+      ]);
+      if (requestID !== driverRequestRef.current) return;
+      setDriverCoordinate(driverLocation);
+      setOrderCoordinate(destination);
+
+      setGeocoding(false);
+      setRouting(true);
+      const nextRoute = await fetchGoongDirections(driverLocation, destination);
+      if (requestID !== driverRequestRef.current) return;
       setRoute(nextRoute);
-    } catch (error: any) {
-      console.error(error);
-      setRoute(MOCK_ROUTE);
-      setErrorMessage(error.message || 'Không thể tải tuyến đường Goong.');
-    }
-  };
-
-  const syncMapMarkers = () => {
-  const map = mapRef.current;
-  if (!map || typeof map.isStyleLoaded !== 'function' || !map.isStyleLoaded()) return;
-
-  const activeRoute = trackingSession?.route ?? route;
-  const routeCoordinates =
-    activeRoute?.coordinates && activeRoute.coordinates.length > 0
-      ? activeRoute.coordinates
-      : MOCK_ROUTE.coordinates;
-
-  // Lấy tọa độ an toàn
-  const destination = routeCoordinates[routeCoordinates.length - 1] ?? ROUTE_END_COORDINATE;
-  const driverPoint = trackingSession?.currentCoordinate ?? routeCoordinates[0] ?? ROUTE_START_COORDINATE;
-
-  // Khởi tạo Marker chiếc xe an toàn
-  if (!truckMarkerRef.current && typeof document !== 'undefined') {
-    const truckElement = document.createElement('div');
-    truckElement.style.width = '26px';
-    truckElement.style.height = '26px';
-    truckElement.style.display = 'flex';
-    truckElement.style.alignItems = 'center';
-    truckElement.style.justifyContent = 'center';
-    truckElement.style.borderRadius = '50%';
-    truckElement.style.background = '#1d4ed8';
-    truckElement.style.border = '2px solid #ffffff';
-    truckElement.style.boxShadow = '0 6px 18px rgba(29,78,216,0.3)';
-    truckElement.style.fontSize = '16px';
-    truckElement.style.transform = 'scale(1.1)';
-    truckElement.textContent = '🚚';
-
-    truckMarkerRef.current = new (window as any).maplibregl.Marker({
-      element: truckElement,
-      anchor: 'center',
-    })
-      .setLngLat(driverPoint) // Gán vị trí trước khi add vào Map
-      .addTo(map);
-  }
-
-  const routeGeoJson = {
-    type: 'FeatureCollection',
-    features: [{
-      type: 'Feature',
-      geometry: { type: 'LineString', coordinates: routeCoordinates },
-      properties: {},
-    }],
-  };
-
-  const destinationGeoJson = {
-    type: 'FeatureCollection',
-    features: [{
-      type: 'Feature',
-      geometry: { type: 'Point', coordinates: destination },
-      properties: { color: '#dc2626' },
-    }],
-  };
-
-  const driverGeoJson = {
-    type: 'FeatureCollection',
-    features: [{
-      type: 'Feature',
-      geometry: { type: 'Point', coordinates: driverPoint },
-      properties: { color: '#2563eb' },
-    }],
-  };
-
-  const ensureSourceAndLayer = (sourceId: string, layerId: string, data: any, color: string) => {
-    if (!map.getSource(sourceId)) {
-      map.addSource(sourceId, { type: 'geojson', data });
-    }
-    if (!map.getLayer(layerId)) {
-      map.addLayer({
-        id: layerId,
-        type: 'line',
-        source: sourceId,
-        paint: {
-          'line-color': '#2563eb',
-          'line-width': 5,
-          'line-opacity': 0.9,
-        },
-      });
-    }
-    const source = map.getSource(sourceId);
-    if (source && typeof source.setData === 'function') {
-      source.setData(data);
-    }
-
-    if (sourceId === 'destination-marker' || sourceId === 'driver-marker') {
-      if (!map.getLayer(`${layerId}-circle`)) {
-        map.addLayer({
-          id: `${layerId}-circle`,
-          type: 'circle',
-          source: sourceId,
-          paint: {
-            'circle-radius': sourceId === 'driver-marker' ? 9 : 10,
-            'circle-color': color,
-            'circle-stroke-color': '#ffffff',
-            'circle-stroke-width': 2,
-          },
-        });
+      const longitudes = nextRoute.coordinates.map(([longitude]) => longitude);
+      const latitudes = nextRoute.coordinates.map(([, latitude]) => latitude);
+      mapRef.current?.fitBounds(
+        [
+          [Math.min(...longitudes), Math.min(...latitudes)],
+          [Math.max(...longitudes), Math.max(...latitudes)],
+        ],
+        { padding: 80, duration: 700 },
+      );
+    } catch (error: unknown) {
+      console.error('Không thể tạo tuyến đường đến người gửi:', error);
+      if (requestID === driverRequestRef.current) {
+        setErrorMessage(
+          error instanceof Error ? error.message : 'Không thể tải tuyến đường Goong.',
+        );
+      }
+    } finally {
+      if (requestID === driverRequestRef.current) {
+        setGeocoding(false);
+        setRouting(false);
       }
     }
   };
 
-  ensureSourceAndLayer('route-line', 'route-line-layer', routeGeoJson, '#2563eb');
-  ensureSourceAndLayer('destination-marker', 'destination-marker-layer', destinationGeoJson, '#dc2626');
-  ensureSourceAndLayer('driver-marker', 'driver-marker-layer', driverGeoJson, '#2563eb');
+  const syncMapMarkers = useCallback(() => {
+    const map = mapRef.current;
+    if (!map || typeof map.isStyleLoaded !== 'function' || !map.isStyleLoaded()) return;
 
-  if (truckMarkerRef.current) {
-    const marker = truckMarkerRef.current;
-    marker.setLngLat(driverPoint);
-    if (trackingSession && trackingSession.heading !== undefined) {
-      marker.setRotation(trackingSession.heading);
+    const activeRoute = trackingSession?.route ?? route;
+    const routeCoordinates = activeRoute?.coordinates ?? [];
+    const destination =
+      orderCoordinate ?? routeCoordinates[routeCoordinates.length - 1] ?? null;
+    const driverPoint =
+      trackingSession?.currentCoordinate ??
+      driverCoordinate ??
+      routeCoordinates[0] ??
+      null;
+
+    if (driverPoint && !truckMarkerRef.current && typeof document !== 'undefined') {
+      const truckElement = document.createElement('div');
+      truckElement.style.width = '26px';
+      truckElement.style.height = '26px';
+      truckElement.style.display = 'flex';
+      truckElement.style.alignItems = 'center';
+      truckElement.style.justifyContent = 'center';
+      truckElement.style.borderRadius = '50%';
+      truckElement.style.background = '#1d4ed8';
+      truckElement.style.border = '2px solid #ffffff';
+      truckElement.style.boxShadow = '0 6px 18px rgba(29,78,216,0.3)';
+      truckElement.style.fontSize = '16px';
+      truckElement.style.transform = 'scale(1.1)';
+      truckElement.textContent = '🚚';
+
+      truckMarkerRef.current = new (window as any).maplibregl.Marker({
+        element: truckElement,
+        anchor: 'center',
+      })
+        .setLngLat(driverPoint)
+        .addTo(map);
+    } else if (!driverPoint && truckMarkerRef.current) {
+      truckMarkerRef.current.remove();
+      truckMarkerRef.current = null;
     }
-  }
 
-  if (trackingSession && driverPoint) {
-    map.easeTo({
-      center: driverPoint,
-      zoom: Math.max(map.getZoom(), 15),
-      duration: 500,
-    });
-  }
-};
+    const routeGeoJson = {
+      type: 'FeatureCollection',
+      features: routeCoordinates.length > 1
+        ? [{
+            type: 'Feature',
+            geometry: { type: 'LineString', coordinates: routeCoordinates },
+            properties: {},
+          }]
+        : [],
+    };
+    const destinationGeoJson = {
+      type: 'FeatureCollection',
+      features: destination
+        ? [{
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: destination },
+            properties: {},
+          }]
+        : [],
+    };
+    const driverGeoJson = {
+      type: 'FeatureCollection',
+      features: driverPoint
+        ? [{
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: driverPoint },
+            properties: {},
+          }]
+        : [],
+    };
+
+    const ensureSourceAndLayer = (sourceId: string, layerId: string, data: any, color: string) => {
+      if (!map.getSource(sourceId)) {
+        map.addSource(sourceId, { type: 'geojson', data });
+      }
+      if (!map.getLayer(layerId)) {
+        map.addLayer(sourceId === 'route-line'
+          ? {
+              id: layerId,
+              type: 'line',
+              source: sourceId,
+              paint: {
+                'line-color': '#2563eb',
+                'line-width': 5,
+                'line-opacity': 0.9,
+              },
+            }
+          : {
+              id: layerId,
+              type: 'circle',
+              source: sourceId,
+              paint: {
+                'circle-radius': sourceId === 'driver-marker' ? 9 : 10,
+                'circle-color': color,
+                'circle-stroke-color': '#ffffff',
+                'circle-stroke-width': 2,
+              },
+            });
+      }
+      const source = map.getSource(sourceId);
+      if (source && typeof source.setData === 'function') source.setData(data);
+    };
+
+    ensureSourceAndLayer('route-line', 'route-line-layer', routeGeoJson, '#2563eb');
+    ensureSourceAndLayer('destination-marker', 'destination-marker-layer', destinationGeoJson, '#dc2626');
+    ensureSourceAndLayer('driver-marker', 'driver-marker-layer', driverGeoJson, '#2563eb');
+
+    if (truckMarkerRef.current && driverPoint) {
+      truckMarkerRef.current.setLngLat(driverPoint);
+      if (trackingSession?.heading !== undefined) {
+        truckMarkerRef.current.setRotation(trackingSession.heading);
+      }
+    }
+
+    if (trackingSession && driverPoint) {
+      map.easeTo({
+        center: driverPoint,
+        zoom: Math.max(map.getZoom(), 15),
+        duration: 500,
+      });
+    }
+  }, [driverCoordinate, orderCoordinate, route, trackingSession]);
 
   const startMockTracking = (order: Order, driver: Driver, assignedRoute: RouteResult) => {
     stopTrackingTimer();
@@ -577,24 +737,67 @@ export default function DriverMapManagement() {
 
   useEffect(() => {
     syncMapMarkers();
-  }, [route, trackingSession]);
+  }, [mapReady, syncMapMarkers]);
 
-  const handleAssign = () => {
-    if (!selectedOrder || !selectedDriver || !route) return;
+  const handleAssign = async () => {
+    if (readOnly || !selectedOrder || !selectedDriver || !route || assigning) return;
+    setAssigning(true);
+    setErrorMessage('');
 
-    stopTrackingTimer();
-    startMockTracking(selectedOrder, selectedDriver, route);
-    setSelectedOrder(null);
-    setSelectedDriver(null);
-    setRoute(null);
+    try {
+      const response = await fetch(ASSIGN_DRIVER_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          DriverIDs: selectedDriver.DriverIDs,
+          OrderIDs: [selectedOrder.OrderID],
+        }),
+      });
+      const payload = (await response.json()) as { message?: string; affectedRows?: number };
+      if (!response.ok || payload.message === 'Lỗi server' || payload.affectedRows !== 1) {
+        throw new Error(payload.message || 'Không thể phân công tài xế.');
+      }
+
+      const order = {
+        ...selectedOrder,
+        shipping_status: 'Tài xế đang đi!',
+        driver_name: selectedDriver.driver_name,
+      };
+      setOrders((currentOrders) =>
+        currentOrders.filter((item) => item.OrderID !== order.OrderID),
+      );
+      stopTrackingTimer();
+      startMockTracking(order, selectedDriver, route);
+      setSelectedOrder(null);
+      setSelectedDriver(null);
+      setOrderCoordinate(null);
+      setDriverCoordinate(null);
+      setRoute(null);
+    } catch (error: unknown) {
+      console.error('Không thể phân công tài xế:', error);
+      setErrorMessage(error instanceof Error ? error.message : 'Không thể phân công tài xế.');
+    } finally {
+      setAssigning(false);
+    }
   };
 
-  const handleCloseTracking = () => {
-    stopTrackingTimer();
-    setTrackingSession(null);
+  const closeSelection = () => {
+    orderRequestRef.current += 1;
+    driverRequestRef.current += 1;
     setSelectedOrder(null);
     setSelectedDriver(null);
+    setOrderCoordinate(null);
+    setDriverCoordinate(null);
     setRoute(null);
+    setGeocoding(false);
+    setRouting(false);
+    setDropdownOpen(false);
+  };
+
+  const handleFinishTracking = () => {
+    stopTrackingTimer();
+    setTrackingSession(null);
+    closeSelection();
   };
 
   return (
@@ -604,37 +807,39 @@ export default function DriverMapManagement() {
 
         {!trackingSession && (
           <OrdersPanel
-            loading={false}
+            loading={ordersLoading}
             orders={orders}
+            drivers={drivers}
+            readOnly={readOnly}
             selectedOrderID={selectedOrder?.OrderID ?? null}
             top={Math.max(insets.top + 8, 16)}
             onSelect={handleSelectOrder}
           />
         )}
 
-        {selectedOrder && !trackingSession && (
+        {selectedOrder && !trackingSession && !readOnly && (
           <DriverSelectPanel
             order={selectedOrder}
             drivers={drivers}
             selectedDriver={selectedDriver}
             dropdownOpen={dropdownOpen}
-            geocoding={false}
-            routing={false}
-            assigning={false}
+            geocoding={geocoding}
+            routing={routing}
+            assigning={assigning}
             route={route}
             onToggleDropdown={() => setDropdownOpen((open) => !open)}
             onSelectDriver={handleSelectDriver}
             onAssign={handleAssign}
-            onClose={() => {
-              setSelectedOrder(null);
-              setSelectedDriver(null);
-              setRoute(null);
-              setDropdownOpen(false);
-            }}
+            onClose={closeSelection}
           />
         )}
 
-        {trackingSession && <TrackingPanel session={trackingSession} onClose={handleCloseTracking} />}
+        {trackingSession && (
+          <TrackingPanel
+            session={trackingSession}
+            onClose={handleFinishTracking}
+          />
+        )}
 
         {loading && (
           <View style={styles.overlayPanel}>
@@ -645,7 +850,7 @@ export default function DriverMapManagement() {
 
         {errorMessage ? (
           <View style={styles.overlayPanel}>
-            <Text style={styles.title}>Lỗi bản đồ web</Text>
+            <Text style={styles.title}>Không thể tải dữ liệu</Text>
             <Text style={styles.text}>{errorMessage}</Text>
           </View>
         ) : null}
@@ -654,12 +859,21 @@ export default function DriverMapManagement() {
   );
 }
 
-function OrdersPanel({ loading, orders, selectedOrderID, top, onSelect }: OrdersPanelProps) {
+function OrdersPanel({
+  loading,
+  orders,
+  drivers,
+  readOnly,
+  selectedOrderID,
+  top,
+  onSelect,
+}: OrdersPanelProps) {
   return (
     <View style={[styles.ordersPanel, { top }]}>
       <View style={styles.panelTitleRow}>
-        <Text style={styles.panelTitle}>Đơn hàng chờ phân công</Text>
-        <Text style={styles.mockBadge}>MOCK</Text>
+        <Text style={styles.panelTitle}>
+          {readOnly ? 'Tổng quan đơn hàng & đội xe' : 'Đơn hàng chờ phân công'}
+        </Text>
       </View>
       {loading ? (
         <View style={styles.inlineLoading}>
@@ -676,7 +890,8 @@ function OrdersPanel({ loading, orders, selectedOrderID, top, onSelect }: Orders
               <TouchableOpacity
                 key={order.OrderID}
                 style={[styles.orderRow, selected && styles.selectedRow]}
-                onPress={() => onSelect(order)}
+                onPress={() => { if (!readOnly) onSelect(order); }}
+                disabled={readOnly}
               >
                 <Text style={[styles.orderTitle, selected && styles.selectedRowText]}>
                   #{order.OrderID} · {order.organization || order.sender_name || 'Khách hàng'}
@@ -684,10 +899,33 @@ function OrdersPanel({ loading, orders, selectedOrderID, top, onSelect }: Orders
                 <Text style={styles.orderAddress} numberOfLines={1}>
                   {order.sender_address || 'Chưa có địa chỉ'}
                 </Text>
+                {readOnly && (
+                  <Text style={styles.orderAddress}>
+                    {order.shipping_status || 'Chưa có trạng thái'}
+                    {order.driver_name ? ` · ${order.driver_name}` : ''}
+                  </Text>
+                )}
               </TouchableOpacity>
             );
           })}
         </ScrollView>
+      )}
+      {readOnly && (
+        <>
+          <Text style={styles.panelTitle}>Tài xế · vị trí mô phỏng KDC Nam Thịnh</Text>
+          <ScrollView style={styles.ordersScroll} nestedScrollEnabled>
+            {drivers.length === 0 ? (
+              <Text style={styles.emptyText}>Chưa có tài xế</Text>
+            ) : (
+              drivers.map((driver) => (
+                <Text key={driver.DriverIDs} style={styles.orderAddress}>
+                  {driver.driver_name || `Tài xế #${driver.DriverIDs}`} ·{' '}
+                  {driver.driver_license_plate_number || 'Chưa có biển số'}
+                </Text>
+              ))
+            )}
+          </ScrollView>
+        </>
       )}
     </View>
   );
@@ -860,7 +1098,7 @@ function TrackingPanel({ session, onClose }: TrackingPanelProps) {
       {completed ? (
         <TouchableOpacity style={styles.finishButton} onPress={onClose}>
           <Ionicons name="flag" size={19} color="#ffffff" />
-          <Text style={styles.assignButtonText}>Kết thúc mô phỏng</Text>
+          <Text style={styles.assignButtonText}>Kết thúc xem trước</Text>
         </TouchableOpacity>
       ) : (
         <View style={styles.autoTrackingHint}>
@@ -1021,15 +1259,6 @@ const styles = StyleSheet.create({
   },
   panelTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 7 },
   panelTitle: { flex: 1, fontSize: 14, fontWeight: '700', color: '#0f172a' },
-  mockBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-    backgroundColor: '#fef3c7',
-    color: '#92400e',
-    fontSize: 9,
-    fontWeight: '800',
-  },
   ordersScroll: { maxHeight: 180 },
   orderRow: { paddingVertical: 8, borderTopWidth: 1, borderTopColor: '#e2e8f0' },
   selectedRow: { backgroundColor: '#eff6ff', marginHorizontal: -6, paddingHorizontal: 6 },

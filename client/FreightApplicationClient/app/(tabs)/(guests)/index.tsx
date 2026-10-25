@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { SafeAreaView, ScrollView, StyleSheet, Text, View, TouchableOpacity, Alert } from "react-native";
+import { ScrollView, StyleSheet, Text, View, TouchableOpacity, Alert } from "react-native";
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -11,44 +11,50 @@ type Order = {
   sender_name?: string;
   shipping_status?: string;
   organization?: string;
+  driver_name?: string;
 };
 
 export default function GuestHome() {
   const router = useRouter();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
-  const [userOrganization, setUserOrganization] = useState('');
 
   useEffect(() => {
-    const fetchUserOrganization = async () => {
-      try {
-        const token = await AsyncStorage.getItem('userToken');
-        if (token) {
-          const user = JSON.parse(token);
-          setUserOrganization(user.organization || '');
-        }
-      } catch (error) {
-        console.error('Lỗi lấy tổ chức:', error);
-      }
-    };
-    fetchUserOrganization();
-    fetchOrders();
+    void fetchOrders();
   }, []);
 
   const fetchOrders = async () => {
     try {
-      const response = await fetch('https://freight-application-server.onrender.com/api/v1/orders/getAllOrders');
-      const data = await response.json();
-      if (response.ok) {
-        // Lọc chỉ lấy các đơn organization là tổ chức của mình
-        const filteredOrganization = (data.data || []).filter((order: Order) => order.organization === userOrganization);
-        setOrders(filteredOrganization);
-      } else {
-        Alert.alert("Lỗi", "Không thể tải danh sách đơn hàng");
+      const rawUser = await AsyncStorage.getItem('userToken');
+      const user = rawUser ? JSON.parse(rawUser) as { token?: string } : null;
+      if (!user?.token) throw new Error('Vui lòng đăng nhập lại để xem đơn hàng.');
+
+      const response = await fetch(
+        'https://freight-application-server.onrender.com/api/v1/orders/getOrdersForTracking',
+        { headers: { Authorization: `Bearer ${user.token}` } },
+      );
+      const body = await response.text();
+      let data: { data?: Order[]; message?: string } | null = null;
+      try {
+        data = JSON.parse(body) as { data?: Order[]; message?: string };
+      } catch {}
+      if (!response.ok) {
+        if (response.status === 404) {
+          throw new Error('API theo dõi chưa được triển khai trên máy chủ.');
+        }
+        throw new Error(
+          data?.message || `Máy chủ gặp lỗi HTTP ${response.status}. Kiểm tra log backend để biết nguyên nhân.`,
+        );
       }
+      if (!data) throw new Error('Máy chủ trả về dữ liệu không hợp lệ.');
+      if (!Array.isArray(data.data)) throw new Error('Danh sách đơn hàng không hợp lệ.');
+      setOrders(data.data);
     } catch (error) {
-      Alert.alert("Lỗi kết nối", "Không thể kết nối đến máy chủ");
       console.error(error);
+      Alert.alert(
+        "Không thể tải đơn hàng",
+        error instanceof Error ? error.message : "Không thể kết nối đến máy chủ.",
+      );
     } finally {
       setLoading(false);
     }
@@ -71,7 +77,19 @@ export default function GuestHome() {
       <Text style={styles.cell}>{order.goods_quantity || 'null'}</Text>
       <Text style={styles.cell}>{order.receiver_name || 'null'}</Text>
       <Text style={styles.cell}>{order.sender_name || 'null'}</Text>
-      <Text style={styles.cell}>{order.shipping_status || 'null'}</Text>
+      {order.shipping_status === 'Tài xế đang đi!' || order.driver_name ? (
+        <TouchableOpacity
+          style={styles.cell}
+          onPress={() => goToOrderDetail(order.OrderID)}
+          accessibilityRole="link"
+          accessibilityLabel={`${order.shipping_status || 'Trạng thái đơn hàng'}, xem thông tin tài xế`}
+        >
+          <Text style={styles.detailLink}>{order.shipping_status || 'Xem thông tin tài xế'}</Text>
+          <Text style={styles.driverInfoHint}>Xem thông tin tài xế</Text>
+        </TouchableOpacity>
+      ) : (
+        <Text style={styles.cell}>{order.shipping_status || 'null'}</Text>
+      )}
       <TouchableOpacity style={styles.cell} onPress={() => goToOrderDetail(order.OrderID)}>
         <Text style={styles.detailLink}>Xem</Text>
       </TouchableOpacity>
@@ -252,6 +270,11 @@ const styles = StyleSheet.create({
   detailLink: {
     color: '#007AFF',
     textDecorationLine: 'underline',
+  },
+  driverInfoHint: {
+    color: '#007AFF',
+    fontSize: 11,
+    marginTop: 3,
   },
   rateRow: {
     flexDirection: 'row',

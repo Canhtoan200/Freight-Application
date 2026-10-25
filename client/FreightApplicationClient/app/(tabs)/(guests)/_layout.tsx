@@ -28,11 +28,11 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="driverDetail"
+        name="trackingMap"
         options={{
-          title: 'Tài xế',
+          title: 'Theo dõi đơn',
           tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'person-sharp' : 'person-outline'} color={color} size={24} />
+            <Ionicons name={focused ? 'map' : 'map-outline'} color={color} size={24} />
           ),
         }}
       />
