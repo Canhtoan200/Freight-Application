@@ -264,12 +264,6 @@ async function geocodeAddress(address: string): Promise<Coordinate> {
   return [location.lng, location.lat];
 }
 
-const getHeading = (from: Coordinate, to: Coordinate) => {
-  const deltaLng = to[0] - from[0];
-  const deltaLat = to[1] - from[1];
-  return (Math.atan2(deltaLng, deltaLat) * 180) / Math.PI;
-};
-
 const loadMapLibre = async () => {
   if (typeof window === 'undefined') return null;
   const existing = (window as any).maplibregl;
@@ -315,6 +309,7 @@ export default function DriverMapManagement({ readOnly = false }: DriverMapManag
   const mapContainerRef = useRef<any>(null);
   const mapRef = useRef<any>(null);
   const truckMarkerRef = useRef<any>(null);
+  const allDriverMarkersRef = useRef<any[]>([]);
   const trackingTimerRef = useRef<number | null>(null);
   const orderRequestRef = useRef(0);
   const driverRequestRef = useRef(0);
@@ -470,6 +465,128 @@ export default function DriverMapManagement({ readOnly = false }: DriverMapManag
       if (map) map.remove();
     };
   }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!mapReady || !map || drivers.length === 0) {
+      allDriverMarkersRef.current.forEach((marker) => marker.remove());
+      allDriverMarkersRef.current = [];
+      return;
+    }
+
+    let active = true;
+    allDriverMarkersRef.current.forEach((marker) => marker.remove());
+    allDriverMarkersRef.current = [];
+
+    const loadDriverMarkers = async () => {
+      const coordinatesByAddress = new Map<string, Coordinate>();
+      const fallbackCoordinate = await geocodeAddress(DRIVER_START_ADDRESS);
+      coordinatesByAddress.set(DRIVER_START_ADDRESS, fallbackCoordinate);
+
+      const locatedDrivers = await Promise.all(drivers.map(async (driver) => {
+        const address = driver.driver_link?.trim() || DRIVER_START_ADDRESS;
+        try {
+          let coordinate = coordinatesByAddress.get(address);
+          if (!coordinate) {
+            coordinate = await geocodeAddress(address);
+            coordinatesByAddress.set(address, coordinate);
+          }
+          return { driver, coordinate, isFallback: !driver.driver_link?.trim() };
+        } catch (error) {
+          console.warn(`Không thể xác định vị trí tài xế #${driver.DriverIDs}; dùng vị trí mô phỏng mặc định.`, error);
+          return { driver, coordinate: fallbackCoordinate, isFallback: true };
+        }
+      }));
+
+      if (!active) return;
+
+      const groups = new Map<string, typeof locatedDrivers>();
+      for (const locatedDriver of locatedDrivers) {
+        const key = locatedDriver.coordinate.map((value) => value.toFixed(5)).join(',');
+        const group = groups.get(key) ?? [];
+        group.push(locatedDriver);
+        groups.set(key, group);
+      }
+
+      const maplibregl = (window as any).maplibregl;
+      for (const group of groups.values()) {
+        const markerElement = document.createElement('div');
+        markerElement.style.display = 'flex';
+        markerElement.style.alignItems = 'center';
+        markerElement.style.justifyContent = 'center';
+        markerElement.style.width = '34px';
+        markerElement.style.height = '34px';
+        markerElement.style.borderRadius = '50%';
+        markerElement.style.background = '#16a34a';
+        markerElement.style.border = '2px solid #ffffff';
+        markerElement.style.boxShadow = '0 2px 8px rgba(15, 23, 42, 0.3)';
+
+        const icon = document.createElement('span');
+        icon.textContent = '🚚';
+        icon.style.fontSize = '19px';
+        markerElement.appendChild(icon);
+
+        const popupContent = document.createElement('div');
+        popupContent.style.minWidth = '190px';
+        popupContent.style.maxWidth = '260px';
+        for (const { driver, isFallback } of group) {
+          const card = document.createElement('div');
+          card.style.padding = '6px 0';
+          card.style.borderBottom = '1px solid #e2e8f0';
+
+          const name = document.createElement('strong');
+          name.textContent = driver.driver_name || `Tài xế #${driver.DriverIDs}`;
+          card.appendChild(name);
+
+          const details = [
+            ['Biển số', driver.driver_license_plate_number || 'Chưa có'],
+            ['Điện thoại', driver.driver_phone_number || 'Chưa có'],
+            ['Địa chỉ', driver.driver_link || 'Chưa có'],
+            ...(isFallback ? [['Vị trí', 'Vị trí mô phỏng mặc định']] : []),
+          ];
+          for (const [label, value] of details) {
+            const detail = document.createElement('div');
+            detail.textContent = `${label}: ${value}`;
+            detail.style.marginTop = '3px';
+            detail.style.fontSize = '12px';
+            card.appendChild(detail);
+          }
+          popupContent.appendChild(card);
+        }
+
+        const marker = new maplibregl.Marker({ element: markerElement, anchor: 'bottom' })
+          .setLngLat(group[0].coordinate)
+          .setPopup(new maplibregl.Popup({ offset: 18 }).setDOMContent(popupContent))
+          .addTo(map);
+        allDriverMarkersRef.current.push(marker);
+      }
+      const coordinates = locatedDrivers.map(({ coordinate }) => coordinate);
+      if (coordinates.length === 1) {
+        map.easeTo({ center: coordinates[0], zoom: 12, duration: 700 });
+      } else if (coordinates.length > 1) {
+        const longitudes = coordinates.map(([longitude]) => longitude);
+        const latitudes = coordinates.map(([, latitude]) => latitude);
+        map.fitBounds(
+          [
+            [Math.min(...longitudes), Math.min(...latitudes)],
+            [Math.max(...longitudes), Math.max(...latitudes)],
+          ],
+          { padding: 80, maxZoom: 12, duration: 700 },
+        );
+      }
+    };
+
+    void loadDriverMarkers().catch((error) => {
+      console.error('Không thể hiển thị vị trí tài xế trên bản đồ:', error);
+      if (active) setErrorMessage('Không thể tải vị trí tài xế trên bản đồ.');
+    });
+
+    return () => {
+      active = false;
+      allDriverMarkersRef.current.forEach((marker) => marker.remove());
+      allDriverMarkersRef.current = [];
+    };
+  }, [drivers, mapReady]);
 
   const handleSelectOrder = async (order: Order) => {
     const requestID = ++orderRequestRef.current;
@@ -686,55 +803,6 @@ export default function DriverMapManagement({ readOnly = false }: DriverMapManag
     }
   }, [driverCoordinate, orderCoordinate, route, trackingSession]);
 
-  const startMockTracking = (order: Order, driver: Driver, assignedRoute: RouteResult) => {
-    stopTrackingTimer();
-
-    const metrics = buildRouteMetrics(assignedRoute.coordinates);
-    if (metrics.totalDistanceMeters <= 0) {
-      return;
-    }
-
-    const startedAt = Date.now();
-    const simulationDurationMs = 45_000;
-    const tickMs = 500;
-
-    setTrackingSession({
-      order: { ...order, shipping_status: 'Đã phân công' },
-      driver,
-      route: assignedRoute,
-      currentCoordinate: metrics.coordinates[0],
-      heading: 0,
-      status: 'Đã phân công',
-      progress: 0,
-      remainingDistanceMeters: metrics.totalDistanceMeters,
-      etaSeconds: Math.ceil(simulationDurationMs / 1000),
-    });
-
-    trackingTimerRef.current = window.setInterval(() => {
-      const elapsed = Date.now() - startedAt;
-      const progress = Math.min(elapsed / simulationDurationMs, 1);
-      const currentCoordinate = interpolateRouteCoordinate(metrics, progress);
-
-      setTrackingSession((currentSession) => {
-        if (!currentSession) return null;
-        const previousCoordinate = currentSession.currentCoordinate ?? metrics.coordinates[0];
-        const heading = getHeading(previousCoordinate, currentCoordinate);
-
-        return {
-          ...currentSession,
-          currentCoordinate,
-          heading,
-          status: progress >= 1 ? 'Đã đến điểm lấy' : 'Tài xế đang đến điểm lấy',
-          progress,
-          remainingDistanceMeters: metrics.totalDistanceMeters * (1 - progress),
-          etaSeconds: Math.max(0, Math.ceil((simulationDurationMs - elapsed) / 1000)),
-        };
-      });
-
-      if (progress >= 1) stopTrackingTimer();
-    }, tickMs);
-  };
-
   useEffect(() => {
     syncMapMarkers();
   }, [mapReady, syncMapMarkers]);
@@ -758,21 +826,12 @@ export default function DriverMapManagement({ readOnly = false }: DriverMapManag
         throw new Error(payload.message || 'Không thể phân công tài xế.');
       }
 
-      const order = {
-        ...selectedOrder,
-        shipping_status: 'Tài xế đang đi!',
-        driver_name: selectedDriver.driver_name,
-      };
       setOrders((currentOrders) =>
-        currentOrders.filter((item) => item.OrderID !== order.OrderID),
+        currentOrders.filter((item) => item.OrderID !== selectedOrder.OrderID),
       );
       stopTrackingTimer();
-      startMockTracking(order, selectedDriver, route);
-      setSelectedOrder(null);
-      setSelectedDriver(null);
-      setOrderCoordinate(null);
-      setDriverCoordinate(null);
-      setRoute(null);
+      setTrackingSession(null);
+      closeSelection();
     } catch (error: unknown) {
       console.error('Không thể phân công tài xế:', error);
       setErrorMessage(error instanceof Error ? error.message : 'Không thể phân công tài xế.');
@@ -1128,71 +1187,6 @@ function formatEta(seconds: number) {
   const safeSeconds = Math.max(0, Math.ceil(seconds));
   if (safeSeconds < 60) return `${safeSeconds}s`;
   return `${Math.floor(safeSeconds / 60)}m ${safeSeconds % 60}s`;
-}
-
-type RouteMetrics = {
-  coordinates: Coordinate[];
-  cumulativeDistances: number[];
-  totalDistanceMeters: number;
-};
-
-function buildRouteMetrics(coordinates: Coordinate[]): RouteMetrics {
-  const cumulativeDistances = [0];
-  let totalDistanceMeters = 0;
-
-  for (let index = 1; index < coordinates.length; index += 1) {
-    totalDistanceMeters += distanceBetweenCoordinates(coordinates[index - 1], coordinates[index]);
-    cumulativeDistances.push(totalDistanceMeters);
-  }
-
-  return { coordinates, cumulativeDistances, totalDistanceMeters };
-}
-
-function interpolateRouteCoordinate(metrics: RouteMetrics, progress: number): Coordinate {
-  const safeProgress = Math.max(0, Math.min(progress, 1));
-
-  if (safeProgress === 0) return metrics.coordinates[0];
-  if (safeProgress === 1) return metrics.coordinates[metrics.coordinates.length - 1];
-
-  const targetDistance = metrics.totalDistanceMeters * safeProgress;
-  let low = 1;
-  let high = metrics.cumulativeDistances.length - 1;
-
-  while (low < high) {
-    const middle = Math.floor((low + high) / 2);
-    if (metrics.cumulativeDistances[middle] < targetDistance) low = middle + 1;
-    else high = middle;
-  }
-
-  const endIndex = low;
-  const startIndex = endIndex - 1;
-  const segmentStart = metrics.cumulativeDistances[startIndex];
-  const segmentLength = metrics.cumulativeDistances[endIndex] - segmentStart;
-  const segmentProgress = segmentLength > 0 ? (targetDistance - segmentStart) / segmentLength : 0;
-  const start = metrics.coordinates[startIndex];
-  const end = metrics.coordinates[endIndex];
-
-  return [
-    start[0] + (end[0] - start[0]) * segmentProgress,
-    start[1] + (end[1] - start[1]) * segmentProgress,
-  ];
-}
-
-function distanceBetweenCoordinates(from: Coordinate, to: Coordinate) {
-  const earthRadiusMeters = 6_371_000;
-  const latitudeDelta = degreesToRadians(to[1] - from[1]);
-  const longitudeDelta = degreesToRadians(to[0] - from[0]);
-  const fromLatitude = degreesToRadians(from[1]);
-  const toLatitude = degreesToRadians(to[1]);
-  const haversine =
-    Math.sin(latitudeDelta / 2) ** 2 +
-    Math.cos(fromLatitude) * Math.cos(toLatitude) * Math.sin(longitudeDelta / 2) ** 2;
-
-  return earthRadiusMeters * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
-}
-
-function degreesToRadians(value: number) {
-  return value * Math.PI / 180;
 }
 
 const styles = StyleSheet.create({

@@ -81,12 +81,6 @@ type TrackingSession = {
   etaSeconds: number;
 };
 
-type RouteMetrics = {
-  coordinates: Coordinate[];
-  cumulativeDistances: number[];
-  totalDistanceMeters: number;
-};
-
 type OrdersPanelProps = {
   loading: boolean;
   orders: Order[];
@@ -117,6 +111,12 @@ type TrackingPanelProps = {
   onClose: () => void;
 };
 
+type LocatedDriver = {
+  driver: Driver;
+  coordinate: Coordinate;
+  isFallback: boolean;
+};
+
 const SERVER_URL = 'https://freight-application-server.onrender.com/api/v1';
 const GOONG_MAPTILES_KEY = process.env.EXPO_PUBLIC_GOONG_MAPTILES_KEY ?? '';
 const GOONG_API_KEY = process.env.EXPO_PUBLIC_GOONG_API_KEY ?? '';
@@ -129,8 +129,6 @@ const ACTIVE_FLEET_STATUSES = new Set([
   'Đã nhận hàng',
   'Đã tới ga',
 ]);
-const SIMULATION_DURATION_MS = 45_000;
-const SIMULATION_TICK_MS = 500;
 const IS_EXPO_GO =
   Constants.appOwnership === 'expo' ||
   Constants.executionEnvironment === 'storeClient';
@@ -154,6 +152,8 @@ export default function DriverMapManagement({ readOnly = false }: DriverMapManag
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [locatedDrivers, setLocatedDrivers] = useState<LocatedDriver[]>([]);
+  const [selectedDriverInfo, setSelectedDriverInfo] = useState<LocatedDriver | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [selectedDriver, setSelectedDriver] = useState<Driver | null>(null);
   const [orderCoordinate, setOrderCoordinate] = useState<Coordinate | null>(null);
@@ -276,6 +276,58 @@ export default function DriverMapManagement({ readOnly = false }: DriverMapManag
     return coordinate;
   };
 
+  useEffect(() => {
+    let active = true;
+    const loadDriverLocations = async () => {
+      const fallbackCoordinate = await resolveAddress(DRIVER_START_ADDRESS);
+      if (!fallbackCoordinate) {
+        throw new Error('Không thể xác định vị trí mô phỏng mặc định của tài xế.');
+      }
+      const locations = await Promise.all(drivers.map(async (driver) => {
+        const address = driver.driver_link?.trim();
+        if (!address) return { driver, coordinate: fallbackCoordinate, isFallback: true };
+        try {
+          const coordinate = await resolveAddress(address);
+          if (!coordinate) throw new Error('Không tìm thấy tọa độ địa chỉ tài xế.');
+          return { driver, coordinate, isFallback: false };
+        } catch (error) {
+          console.warn(`Không thể xác định vị trí tài xế #${driver.DriverIDs}; dùng vị trí mô phỏng mặc định.`, error);
+          return { driver, coordinate: fallbackCoordinate, isFallback: true };
+        }
+      }));
+      if (!active) return;
+      setLocatedDrivers(locations);
+      if (locations.length === 1) {
+        cameraRef.current?.easeTo({ center: locations[0].coordinate, zoom: 12, duration: 700 });
+      } else if (locations.length > 1) {
+        const longitudes = locations.map(({ coordinate }) => coordinate[0]);
+        const latitudes = locations.map(({ coordinate }) => coordinate[1]);
+        cameraRef.current?.fitBounds(
+          [
+            Math.min(...longitudes),
+            Math.min(...latitudes),
+            Math.max(...longitudes),
+            Math.max(...latitudes),
+          ],
+          { padding: { top: 80, right: 80, bottom: 80, left: 80 }, duration: 700 },
+        );
+      }
+    };
+
+    if (drivers.length > 0) {
+      void loadDriverLocations().catch((error) => {
+        console.error('Không thể tải vị trí tài xế:', error);
+        if (active) setErrorMessage('Không thể tải vị trí tài xế trên bản đồ.');
+      });
+    } else {
+      setLocatedDrivers([]);
+    }
+
+    return () => {
+      active = false;
+    };
+  }, [drivers]);
+
   const handleSelectOrder = async (order: Order) => {
     const requestID = ++orderRequestRef.current;
     driverRequestRef.current += 1;
@@ -347,47 +399,6 @@ export default function DriverMapManagement({ readOnly = false }: DriverMapManag
     trackingTimerRef.current = null;
   };
 
-  const startMockTracking = (order: Order, driver: Driver, assignedRoute: RouteResult) => {
-    stopTrackingTimer();
-
-    const metrics = buildRouteMetrics(assignedRoute.coordinates);
-    if (metrics.totalDistanceMeters <= 0) {
-      throw new Error('Tuyến đường không đủ dữ liệu để mô phỏng');
-    }
-
-    const startedAt = Date.now();
-    setTrackingSession({
-      order: { ...order, shipping_status: 'Đã phân công' },
-      driver,
-      route: assignedRoute,
-      currentCoordinate: metrics.coordinates[0],
-      status: 'Đã phân công',
-      progress: 0,
-      remainingDistanceMeters: metrics.totalDistanceMeters,
-      etaSeconds: Math.ceil(SIMULATION_DURATION_MS / 1000),
-    });
-
-    trackingTimerRef.current = setInterval(() => {
-      const elapsed = Date.now() - startedAt;
-      const progress = Math.min(elapsed / SIMULATION_DURATION_MS, 1);
-      const currentCoordinate = interpolateRouteCoordinate(metrics, progress);
-
-      setTrackingSession((currentSession) => {
-        if (!currentSession) return null;
-        return {
-          ...currentSession,
-          currentCoordinate,
-          status: progress >= 1 ? 'Đã đến điểm lấy' : 'Tài xế đang đến điểm lấy',
-          progress,
-          remainingDistanceMeters: metrics.totalDistanceMeters * (1 - progress),
-          etaSeconds: Math.max(0, Math.ceil((SIMULATION_DURATION_MS - elapsed) / 1000)),
-        };
-      });
-
-      if (progress >= 1) stopTrackingTimer();
-    }, SIMULATION_TICK_MS);
-  };
-
   const handleAssignDriver = async () => {
     if (!selectedOrder || !selectedDriver || !route) return;
 
@@ -398,8 +409,7 @@ export default function DriverMapManagement({ readOnly = false }: DriverMapManag
       setOrders((currentOrders) =>
         currentOrders.filter((order) => order.OrderID !== selectedOrder.OrderID),
       );
-      setDropdownOpen(false);
-      startMockTracking(selectedOrder, selectedDriver, route);
+      closeSelection();
     } catch (error) {
       console.error('Không thể phân công tài xế:', error);
       setErrorMessage('Không thể xác nhận phân công tài xế.');
@@ -477,11 +487,24 @@ export default function DriverMapManagement({ readOnly = false }: DriverMapManag
           </Marker>
         )}
 
+        {locatedDrivers.map(({ driver, coordinate, isFallback }) => (
+          <Marker
+            key={`driver-${driver.DriverIDs}`}
+            id={`driver-${driver.DriverIDs}`}
+            lngLat={coordinate}
+            anchor="bottom"
+            onPress={() => setSelectedDriverInfo({ driver, coordinate, isFallback })}
+          >
+            <View style={styles.allDriverMarker}>
+              <Ionicons name="car-sport" size={20} color="#ffffff" />
+            </View>
+          </Marker>
+        ))}
+
         {visibleDriverCoordinate && (
           <Marker id="selected-driver" lngLat={visibleDriverCoordinate} anchor="bottom">
             <View style={styles.driverMarker}>
               <Ionicons name="car-sport" size={22} color="#ffffff" />
-              {readOnly && <Text style={styles.driverCount}>{drivers.length}</Text>}
             </View>
           </Marker>
         )}
@@ -507,6 +530,34 @@ export default function DriverMapManagement({ readOnly = false }: DriverMapManag
           </GeoJSONSource>
         )}
       </Map>
+
+      {selectedDriverInfo && (
+        <View style={styles.driverInfoPopup}>
+          <View style={styles.driverInfoHeader}>
+            <Text style={styles.driverInfoTitle}>
+              {selectedDriverInfo.driver.driver_name || `Tài xế #${selectedDriverInfo.driver.DriverIDs}`}
+            </Text>
+            <TouchableOpacity
+              accessibilityLabel="Đóng thông tin tài xế"
+              onPress={() => setSelectedDriverInfo(null)}
+            >
+              <Ionicons name="close-circle" size={24} color="#64748b" />
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.driverInfoText}>
+            Biển số: {selectedDriverInfo.driver.driver_license_plate_number || 'Chưa có'}
+          </Text>
+          <Text style={styles.driverInfoText}>
+            Điện thoại: {selectedDriverInfo.driver.driver_phone_number || 'Chưa có'}
+          </Text>
+          <Text style={styles.driverInfoText}>
+            Địa chỉ: {selectedDriverInfo.driver.driver_link || 'Chưa có'}
+          </Text>
+          {selectedDriverInfo.isFallback && (
+            <Text style={styles.driverInfoNote}>Marker tại vị trí mô phỏng mặc định.</Text>
+          )}
+        </View>
+      )}
 
       {!trackingSession && (
         <OrdersPanel
@@ -619,23 +670,20 @@ function OrdersPanel({
           })}
         </ScrollView>
       )}
-      {readOnly && (
-        <>
-          <Text style={styles.panelTitle}>Tài xế tại KDC Nam Thịnh</Text>
-          <ScrollView style={styles.ordersScroll} nestedScrollEnabled>
-            {drivers.length === 0 ? (
-              <Text style={styles.emptyText}>Chưa có tài xế</Text>
-            ) : (
-              drivers.map((driver) => (
-                <Text key={driver.DriverIDs} style={styles.orderAddress}>
-                  {driver.driver_name || `Tài xế #${driver.DriverIDs}`} ·{' '}
-                  {driver.driver_license_plate_number || 'Chưa có biển số'}
-                </Text>
-              ))
-            )}
-          </ScrollView>
-        </>
-      )}
+      <Text style={styles.panelTitle}>Tài xế trên bản đồ ({drivers.length})</Text>
+      <ScrollView style={styles.ordersScroll} nestedScrollEnabled>
+        {drivers.length === 0 ? (
+          <Text style={styles.emptyText}>Chưa có tài xế</Text>
+        ) : (
+          drivers.map((driver) => (
+            <Text key={driver.DriverIDs} style={styles.orderAddress}>
+              {driver.driver_name || `Tài xế #${driver.DriverIDs}`} ·{' '}
+              {driver.driver_license_plate_number || 'Chưa có biển số'} ·{' '}
+              {driver.driver_link || 'Vị trí mô phỏng mặc định'}
+            </Text>
+          ))
+        )}
+      </ScrollView>
     </View>
   );
 }
@@ -967,66 +1015,6 @@ async function parseResponse(response: Response): Promise<any> {
 }
 
 
-function buildRouteMetrics(coordinates: Coordinate[]): RouteMetrics {
-  const cumulativeDistances = [0];
-  let totalDistanceMeters = 0;
-
-  for (let index = 1; index < coordinates.length; index += 1) {
-    totalDistanceMeters += distanceBetweenCoordinates(coordinates[index - 1], coordinates[index]);
-    cumulativeDistances.push(totalDistanceMeters);
-  }
-
-  return { coordinates, cumulativeDistances, totalDistanceMeters };
-}
-
-function interpolateRouteCoordinate(metrics: RouteMetrics, progress: number): Coordinate {
-  const safeProgress = Math.max(0, Math.min(progress, 1));
-  if (safeProgress === 0) return metrics.coordinates[0];
-  if (safeProgress === 1) return metrics.coordinates[metrics.coordinates.length - 1];
-
-  const targetDistance = metrics.totalDistanceMeters * safeProgress;
-  let low = 1;
-  let high = metrics.cumulativeDistances.length - 1;
-
-  while (low < high) {
-    const middle = Math.floor((low + high) / 2);
-    if (metrics.cumulativeDistances[middle] < targetDistance) low = middle + 1;
-    else high = middle;
-  }
-
-  const endIndex = low;
-  const startIndex = endIndex - 1;
-  const segmentStart = metrics.cumulativeDistances[startIndex];
-  const segmentLength = metrics.cumulativeDistances[endIndex] - segmentStart;
-  const segmentProgress = segmentLength > 0
-    ? (targetDistance - segmentStart) / segmentLength
-    : 0;
-  const start = metrics.coordinates[startIndex];
-  const end = metrics.coordinates[endIndex];
-
-  return [
-    start[0] + (end[0] - start[0]) * segmentProgress,
-    start[1] + (end[1] - start[1]) * segmentProgress,
-  ];
-}
-
-function distanceBetweenCoordinates(from: Coordinate, to: Coordinate) {
-  const earthRadiusMeters = 6_371_000;
-  const latitudeDelta = degreesToRadians(to[1] - from[1]);
-  const longitudeDelta = degreesToRadians(to[0] - from[0]);
-  const fromLatitude = degreesToRadians(from[1]);
-  const toLatitude = degreesToRadians(to[1]);
-  const haversine =
-    Math.sin(latitudeDelta / 2) ** 2
-    + Math.cos(fromLatitude) * Math.cos(toLatitude) * Math.sin(longitudeDelta / 2) ** 2;
-
-  return earthRadiusMeters * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
-}
-
-function degreesToRadians(value: number) {
-  return value * Math.PI / 180;
-}
-
 function formatDistance(distanceMeters: number) {
   if (distanceMeters >= 1000) return `${(distanceMeters / 1000).toFixed(1)} km`;
   return `${Math.max(0, Math.round(distanceMeters))} m`;
@@ -1062,6 +1050,39 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: '#ffffff',
   },
+  allDriverMarker: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#16a34a',
+    borderWidth: 2,
+    borderColor: '#ffffff',
+  },
+  driverInfoPopup: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 20,
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: '#ffffff',
+    elevation: 10,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+  },
+  driverInfoHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  driverInfoTitle: { flex: 1, fontSize: 16, fontWeight: '700', color: '#0f172a' },
+  driverInfoText: { marginTop: 4, color: '#334155', fontSize: 13 },
+  driverInfoNote: { marginTop: 6, color: '#64748b', fontSize: 12, fontStyle: 'italic' },
   driverCount: {
     position: 'absolute',
     top: -8,
