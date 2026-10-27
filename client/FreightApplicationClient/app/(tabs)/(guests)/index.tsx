@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useCallback } from "react";
 import { ScrollView, StyleSheet, Text, View, TouchableOpacity, Alert } from "react-native";
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type Order = {
@@ -19,11 +19,8 @@ export default function GuestHome() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    void fetchOrders();
-  }, []);
-
-  const fetchOrders = async () => {
+  const fetchOrders = useCallback(async () => {
+    setLoading(true);
     try {
       const rawUser = await AsyncStorage.getItem('userToken');
       const user = rawUser ? JSON.parse(rawUser) as { token?: string } : null;
@@ -58,7 +55,13 @@ export default function GuestHome() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      void fetchOrders();
+    }, [fetchOrders]),
+  );
 
   const goToCreateOrder = () => {
     router.push('/(tabs)/(guests)/createOrder');
@@ -77,7 +80,8 @@ export default function GuestHome() {
       <Text style={styles.cell}>{order.goods_quantity || 'null'}</Text>
       <Text style={styles.cell}>{order.receiver_name || 'null'}</Text>
       <Text style={styles.cell}>{order.sender_name || 'null'}</Text>
-      {order.shipping_status === 'Tài xế đang đi!' || order.driver_name ? (
+      {order.shipping_status !== 'Đã lên toa' &&
+      (order.shipping_status === 'Tài xế đang đi!' || order.driver_name) ? (
         <TouchableOpacity
           style={styles.cell}
           onPress={() => goToOrderDetail(order.OrderID)}

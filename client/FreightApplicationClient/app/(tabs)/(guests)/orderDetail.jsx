@@ -1,14 +1,21 @@
 ﻿import React, { useState, useEffect } from "react";
-import { ScrollView, StyleSheet, Text, View, ActivityIndicator, Alert, TouchableOpacity } from "react-native";
+import { ScrollView, StyleSheet, Text, View, ActivityIndicator, Alert, TouchableOpacity, Image, Platform } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
+
+const API_URL = "https://freight-application-server.onrender.com/api/v1/orders";
 
 export default function OrderDetail() {
     const router = useRouter();
     const { orderId } = useLocalSearchParams();
     const [order, setOrder] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [evidence, setEvidence] = useState([]);
+    const [evidenceError, setEvidenceError] = useState("");
+    const [downloadingEndpoint, setDownloadingEndpoint] = useState(null);
 
     const goBack = () => {
         if (router.canGoBack && router.canGoBack()) {
@@ -31,7 +38,7 @@ export default function OrderDetail() {
                 if (!user?.token) {
                     throw new Error("Vui lòng đăng nhập lại để xem chi tiết đơn hàng.");
                 }
-                const response = await fetch("https://freight-application-server.onrender.com/api/v1/orders/getOrdersForTracking", {
+                const response = await fetch(`${API_URL}/getOrdersForTracking`, {
                     headers: { Authorization: `Bearer ${user.token}` },
                 });
                 const body = await response.text();
@@ -50,6 +57,31 @@ export default function OrderDetail() {
 
                 if (foundOrder) {
                     setOrder(foundOrder);
+                    try {
+                        const evidenceResponse = await fetch(`${API_URL}/guest/${orderId}/evidence`, {
+                            headers: { Authorization: `Bearer ${user.token}` },
+                        });
+                        const evidenceBody = await evidenceResponse.text();
+                        let evidenceData = null;
+                        try {
+                            evidenceData = JSON.parse(evidenceBody);
+                        } catch {}
+                        if (!evidenceResponse.ok) {
+                            throw new Error(
+                                evidenceData?.message ||
+                                (evidenceResponse.status === 404
+                                    ? "API biên bản chưa được cập nhật trên máy chủ."
+                                    : `Máy chủ gặp lỗi HTTP ${evidenceResponse.status}.`)
+                            );
+                        }
+                        if (!Array.isArray(evidenceData?.data)) {
+                            throw new Error("Danh sách biên bản giao nhận không hợp lệ.");
+                        }
+                        setEvidence(evidenceData.data);
+                    } catch (error) {
+                        console.error("Không thể tải biên bản giao nhận:", error);
+                        setEvidenceError(error instanceof Error ? error.message : "Không thể tải biên bản giao nhận.");
+                    }
                 } else {
                     Alert.alert("Không tìm thấy", "Đơn hàng không tồn tại hoặc đã bị xóa.");
                 }
@@ -66,6 +98,59 @@ export default function OrderDetail() {
 
         fetchOrderDetail();
     }, [orderId]);
+
+    const downloadEvidence = async (item) => {
+        setDownloadingEndpoint(item.endpoint);
+        try {
+            const extensionByMimeType = {
+                "image/jpeg": "jpg",
+                "image/png": "png",
+                "image/webp": "webp",
+            };
+            const extension = extensionByMimeType[item.mimeType];
+            if (!extension) throw new Error("Định dạng ảnh không được hỗ trợ để tải xuống.");
+            const fileName = `bien-ban-don-${orderId}-${item.endpoint}.${extension}`;
+
+            if (Platform.OS === "web") {
+                const binary = window.atob(item.imageData);
+                const bytes = new Uint8Array(binary.length);
+                for (let index = 0; index < binary.length; index += 1) {
+                    bytes[index] = binary.charCodeAt(index);
+                }
+                const blob = new Blob([bytes], { type: item.mimeType });
+                const objectUrl = URL.createObjectURL(blob);
+                const link = document.createElement("a");
+                link.href = objectUrl;
+                link.download = fileName;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(objectUrl);
+                return;
+            }
+
+            if (!FileSystem.cacheDirectory) {
+                throw new Error("Không tìm thấy thư mục lưu ảnh trên thiết bị.");
+            }
+            const fileUri = `${FileSystem.cacheDirectory}${fileName}`;
+            await FileSystem.writeAsStringAsync(fileUri, item.imageData, {
+                encoding: FileSystem.EncodingType.Base64,
+            });
+            if (!(await Sharing.isAvailableAsync())) {
+                throw new Error("Thiết bị không hỗ trợ chia sẻ để lưu ảnh ra ngoài.");
+            }
+            await Sharing.shareAsync(fileUri, {
+                mimeType: item.mimeType,
+                dialogTitle: "Lưu ảnh biên bản",
+                UTI: `public.${extension}`,
+            });
+        } catch (error) {
+            console.error("Không thể tải ảnh biên bản:", error);
+            Alert.alert("Lỗi", error instanceof Error ? error.message : "Không thể tải ảnh biên bản.");
+        } finally {
+            setDownloadingEndpoint(null);
+        }
+    };
 
     if (loading) {
         return (
@@ -138,12 +223,16 @@ export default function OrderDetail() {
                 <Text style={styles.sectionTitle}>Thông tin giao hàng</Text>
                 <Text style={styles.label}>Hướng xử lý:</Text>
                 <Text style={styles.value}>{order.handling_instruction || "Không có"}</Text>
-                <Text style={styles.label}>Tài xế:</Text>
-                <Text style={styles.value}>{order.driver_name || "Chưa có"}</Text>
-                <Text style={styles.label}>Biển số:</Text>
-                <Text style={styles.value}>{order.driver_license_plate || "Chưa có"}</Text>
-                <Text style={styles.label}>Số điện thoại tài xế:</Text>
-                <Text style={styles.value}>{order.driver_phone_number || "Chưa có"}</Text>
+                {order.shipping_status !== "Đã lên toa" && (
+                    <>
+                        <Text style={styles.label}>Tài xế:</Text>
+                        <Text style={styles.value}>{order.driver_name || "Chưa có"}</Text>
+                        <Text style={styles.label}>Biển số:</Text>
+                        <Text style={styles.value}>{order.driver_license_plate || "Chưa có"}</Text>
+                        <Text style={styles.label}>Số điện thoại tài xế:</Text>
+                        <Text style={styles.value}>{order.driver_phone_number || "Chưa có"}</Text>
+                    </>
+                )}
                 <Text style={styles.label}>Số toa:</Text>
                 <Text style={styles.value}>{order.wagon_number || "Chưa có"}</Text>
                 <Text style={styles.label}>Ngày chạy:</Text>
@@ -152,6 +241,45 @@ export default function OrderDetail() {
             <View style={styles.section}>
                 <Text style={styles.label}>Ghi chú:</Text>
                 <Text style={styles.value}>{order.note || "Không có"}</Text>
+            </View>
+            <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Biên bản giao nhận</Text>
+                {evidenceError ? (
+                    <Text style={styles.errorText}>{evidenceError}</Text>
+                ) : (
+                    ["sender", "receiver"].map((endpoint) => {
+                        const item = evidence.find((entry) => entry.endpoint === endpoint);
+                        return (
+                            <View key={endpoint} style={styles.evidenceBlock}>
+                                <Text style={styles.sectionTitle}>
+                                    Biên bản đầu {endpoint === "sender" ? "gửi" : "nhận"}
+                                </Text>
+                                {item ? (
+                                    <>
+                                        <Image
+                                            source={{ uri: `data:${item.mimeType};base64,${item.imageData}` }}
+                                            style={styles.evidenceImage}
+                                            resizeMode="contain"
+                                        />
+                                        <TouchableOpacity
+                                            style={styles.downloadButton}
+                                            onPress={() => downloadEvidence(item)}
+                                            disabled={downloadingEndpoint !== null}
+                                        >
+                                            {downloadingEndpoint === endpoint ? (
+                                                <ActivityIndicator color="#fff" />
+                                            ) : (
+                                                <Text style={styles.downloadButtonText}>Tải ảnh về thiết bị</Text>
+                                            )}
+                                        </TouchableOpacity>
+                                    </>
+                                ) : (
+                                    <Text style={styles.value}>Chưa có ảnh biên bản đầu {endpoint === "sender" ? "gửi" : "nhận"}.</Text>
+                                )}
+                            </View>
+                        );
+                    })
+                )}
             </View>
         </ScrollView>
     );
@@ -195,6 +323,29 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '700',
         marginBottom: 8,
+    },
+    evidenceBlock: {
+        marginTop: 12,
+    },
+    evidenceImage: {
+        width: '100%',
+        height: 320,
+        backgroundColor: '#eee',
+        borderRadius: 6,
+    },
+    downloadButton: {
+        minHeight: 44,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: '#1976d2',
+        borderRadius: 6,
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+        marginTop: 10,
+    },
+    downloadButtonText: {
+        color: '#fff',
+        fontWeight: '700',
     },
     label: {
         fontWeight: '600',

@@ -77,11 +77,17 @@ export default function CreateOrder() {
     };
 
     try {
+      const rawUser = await AsyncStorage.getItem('userToken');
+      const user = rawUser ? JSON.parse(rawUser) as { token?: string } : null;
+      if (!user?.token) {
+        throw new Error('Vui lòng đăng nhập lại trước khi tạo đơn hàng.');
+      }
       const response = await fetch('https://freight-application-server.onrender.com/api/v1/orders/createGuestOrder', {
         method: 'POST',
         headers: {
           'Accept': 'application/json',
           'Content-Type': 'application/json',
+          Authorization: `Bearer ${user.token}`,
         },
         body: JSON.stringify(orderData),
       });
@@ -91,11 +97,14 @@ export default function CreateOrder() {
         console.log("Đơn hàng đã được tạo:", data);
         goBack();
       } else {
-        console.log("Lỗi từ server:", data);
+        Alert.alert("Không thể tạo đơn hàng", data.message || "Máy chủ không thể tạo đơn hàng.");
       }
     } catch (error) {
-      Alert.alert("Lỗi kết nối", "Không thể kết nối đến máy chủ. Vui lòng kiểm tra kết nối Internet.");
       console.error(error);
+      Alert.alert(
+        "Không thể tạo đơn hàng",
+        error instanceof Error ? error.message : "Không thể kết nối đến máy chủ.",
+      );
     }
   };
 

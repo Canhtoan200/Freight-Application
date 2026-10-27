@@ -487,7 +487,9 @@ export default function DriverMapManagement({ readOnly = false }: DriverMapManag
           </Marker>
         )}
 
-        {locatedDrivers.map(({ driver, coordinate, isFallback }) => (
+        {locatedDrivers
+          .filter(({ driver }) => driver.DriverIDs !== selectedDriver?.DriverIDs)
+          .map(({ driver, coordinate, isFallback }) => (
           <Marker
             key={`driver-${driver.DriverIDs}`}
             id={`driver-${driver.DriverIDs}`}
@@ -499,7 +501,7 @@ export default function DriverMapManagement({ readOnly = false }: DriverMapManag
               <Ionicons name="car-sport" size={20} color="#ffffff" />
             </View>
           </Marker>
-        ))}
+          ))}
 
         {visibleDriverCoordinate && (
           <Marker id="selected-driver" lngLat={visibleDriverCoordinate} anchor="bottom">

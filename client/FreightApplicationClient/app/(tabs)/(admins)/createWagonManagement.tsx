@@ -15,6 +15,70 @@ import DateTimePicker, {
   DateTimePickerAndroid,
 } from "@react-native-community/datetimepicker";
 
+type WagonPayload = {
+  wagon_number: string;
+  wagon_route: string;
+  wagon_departure_date: string;
+  wagon_arrival_date: string;
+};
+
+function formatDate(date: Date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  const h = String(date.getHours()).padStart(2, "0");
+  const min = String(date.getMinutes()).padStart(2, "0");
+  return `${y}-${m}-${d} ${h}:${min}`;
+}
+
+function toDateTimeLocalValue(date: Date | null) {
+  if (!date) return "";
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  const h = String(date.getHours()).padStart(2, "0");
+  const min = String(date.getMinutes()).padStart(2, "0");
+  return `${y}-${m}-${d}T${h}:${min}`;
+}
+
+function parseDateTimeLocalValue(value: string) {
+  if (!value) return null;
+  const [datePart, timePart] = value.split("T");
+  if (!datePart || !timePart) return null;
+  const [year, month, day] = datePart.split("-").map(Number);
+  const [hours, minutes] = timePart.split(":").map(Number);
+  const date = new Date(year, month - 1, day, hours, minutes);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+type WebDateTimeInputProps = {
+  value: Date | null;
+  onChange: (date: Date | null) => void;
+  minimum?: Date;
+  maximum?: Date;
+};
+
+function WebDateTimeInput({ value, onChange, minimum, maximum }: WebDateTimeInputProps) {
+  return React.createElement("input", {
+    type: "datetime-local",
+    value: toDateTimeLocalValue(value),
+    min: toDateTimeLocalValue(minimum ?? null),
+    max: toDateTimeLocalValue(maximum ?? null),
+    onChange: (event) => onChange(parseDateTimeLocalValue(event.currentTarget.value)),
+    style: {
+      boxSizing: "border-box",
+      width: "100%",
+      minHeight: 42,
+      padding: "10px 12px",
+      border: "1px solid #ccc",
+      borderRadius: 6,
+      backgroundColor: "#fff",
+      color: "#333",
+      fontSize: 14,
+    },
+  });
+}
+
 export default function CreateWagonManagement() {
   const router = useRouter();
 
@@ -26,22 +90,23 @@ export default function CreateWagonManagement() {
   const [showIOSArrivalPicker, setShowIOSArrivalPicker] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const formatDate = (date: Date) => {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, "0");
-    const d = String(date.getDate()).padStart(2, "0");
-    const h = String(date.getHours()).padStart(2, "0");
-    const min = String(date.getMinutes()).padStart(2, "0");
-    return `${y}-${m}-${d} ${h}:${min}`;
-  };
-
   const openDatePicker = () => {
     if (Platform.OS === "android") {
       DateTimePickerAndroid.open({
         value: departureDate ?? new Date(),
         onChange: (event: any, selectedDate?: Date) => {
           if (event.type === "set" && selectedDate) {
-            setDepartureDate(selectedDate);
+            DateTimePickerAndroid.open({
+              value: selectedDate,
+              mode: "time",
+              onChange: (timeEvent: any, selectedTime?: Date) => {
+                if (timeEvent.type === "set" && selectedTime) {
+                  const dateTime = new Date(selectedDate);
+                  dateTime.setHours(selectedTime.getHours(), selectedTime.getMinutes());
+                  setDepartureDate(dateTime);
+                }
+              },
+            });
           }
         },
         mode: "date",
@@ -57,7 +122,17 @@ export default function CreateWagonManagement() {
         value: arrivalDate ?? new Date(),
         onChange: (event: any, selectedDate?: Date) => {
           if (event.type === "set" && selectedDate) {
-            setArrivalDate(selectedDate);
+            DateTimePickerAndroid.open({
+              value: selectedDate,
+              mode: "time",
+              onChange: (timeEvent: any, selectedTime?: Date) => {
+                if (timeEvent.type === "set" && selectedTime) {
+                  const dateTime = new Date(selectedDate);
+                  dateTime.setHours(selectedTime.getHours(), selectedTime.getMinutes());
+                  setArrivalDate(dateTime);
+                }
+              },
+            });
           }
         },
         mode: "date",
@@ -80,26 +155,26 @@ export default function CreateWagonManagement() {
       Alert.alert("Thông báo", "Vui lòng nhập tuyến đường toa");
       return;
     }
+    if (!departureDate || !arrivalDate) {
+      Alert.alert("Thông báo", "Vui lòng chọn ngày khởi hành và ngày đến.");
+      return;
+    }
+    if (arrivalDate < departureDate) {
+      Alert.alert("Thông báo", "Ngày đến phải sau ngày khởi hành.");
+      return;
+    }
 
-    const payload: {
-      wagon_number: string;
-      wagon_route: string;
-      wagon_departure_date?: string;
-    } = {
+    const payload: WagonPayload = {
       wagon_number: wagonNumber.trim(),
       wagon_route: wagonRoute.trim(),
+      wagon_departure_date: formatDate(departureDate),
+      wagon_arrival_date: formatDate(arrivalDate),
     };
-    if (departureDate) {
-      payload.wagon_departure_date = formatDate(departureDate);
-    }
-    if (arrivalDate) {
-      (payload as any).wagon_arrival_date = formatDate(arrivalDate);
-    }
 
     setLoading(true);
     try {
       const response = await fetch(
-        "https://freight-application-server.onrender.com/api/v1/orders/createWagonOrder",
+        "https://freight-application-server.onrender.com/api/v1/wagons/createWagonOrder",
         {
           method: "POST",
           headers: {
@@ -112,9 +187,7 @@ export default function CreateWagonManagement() {
       const data = await response.json();
 
       if (response.ok) {
-        Alert.alert("Thành công", data.message || "Tạo toa tàu thành công", [
-          { text: "OK", onPress: goBack },
-        ]);
+        router.replace("/(tabs)/(admins)" as any);
       } else {
         Alert.alert("Lỗi", data.message || "Tạo toa tàu thất bại");
       }
@@ -172,14 +245,10 @@ export default function CreateWagonManagement() {
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Ngày khởi hành<Text style={styles.required}>*</Text></Text>
           {Platform.OS === "web" ? (
-            <TextInput
-              style={styles.input}
-              value={departureDate ? formatDate(departureDate) : ""}
-              onChangeText={(text) => {
-                const parsed = new Date(text);
-                if (!isNaN(parsed.getTime())) setDepartureDate(parsed);
-              }}
-              placeholder="YYYY-MM-DD HH:MM (không bắt buộc)"
+            <WebDateTimeInput
+              value={departureDate}
+              onChange={setDepartureDate}
+              maximum={arrivalDate ?? undefined}
             />
           ) : (
             <TouchableOpacity
@@ -193,7 +262,7 @@ export default function CreateWagonManagement() {
               >
                 {departureDate
                   ? formatDate(departureDate)
-                  : "Chọn ngày khởi hành (không bắt buộc)"}
+                  : "Chọn ngày và giờ khởi hành"}
               </Text>
             </TouchableOpacity>
           )}
@@ -210,6 +279,7 @@ export default function CreateWagonManagement() {
                     value={departureDate ?? new Date()}
                     mode="datetime"
                     display="spinner"
+                    maximumDate={arrivalDate ?? undefined}
                     onChange={(_event: any, selectedDate?: Date) => {
                       if (selectedDate) setDepartureDate(selectedDate);
                     }}
@@ -230,14 +300,10 @@ export default function CreateWagonManagement() {
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Ngày đến<Text style={styles.required}>*</Text></Text>
           {Platform.OS === "web" ? (
-            <TextInput
-              style={styles.input}
-              value={arrivalDate ? formatDate(arrivalDate) : ""}
-              onChangeText={(text) => {
-                const parsed = new Date(text);
-                if (!isNaN(parsed.getTime())) setArrivalDate(parsed);
-              }}
-              placeholder="YYYY-MM-DD HH:MM"
+            <WebDateTimeInput
+              value={arrivalDate}
+              onChange={setArrivalDate}
+              minimum={departureDate ?? undefined}
             />
           ) : (
             <TouchableOpacity
@@ -264,6 +330,7 @@ export default function CreateWagonManagement() {
                     value={arrivalDate ?? new Date()}
                     mode="datetime"
                     display="spinner"
+                    minimumDate={departureDate ?? undefined}
                     onChange={(_event: any, selectedDate?: Date) => {
                       if (selectedDate) setArrivalDate(selectedDate);
                     }}

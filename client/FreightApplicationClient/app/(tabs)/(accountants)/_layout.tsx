@@ -54,6 +54,14 @@ export default function TabLayout() {
           ),
         }}
       />
+      <Tabs.Screen
+        name="orderManagement"
+        options={{
+          title: 'Chi tiết đơn hàng',
+          tabBarStyle: { display: 'none' },
+          href: null,
+        }}
+      />
     </Tabs>
   );
 }

@@ -17,7 +17,15 @@ type Order = {
 type Wagon = {
   WagonID: number;
   wagon_number?: string;
-  wagon_departure_date?: Date;
+  wagon_route?: string;
+  wagon_departure_date?: string | Date;
+  wagon_arrival_date?: string | Date;
+};
+
+const formatWagonDate = (value?: string | Date) => {
+  if (!value) return "Chưa có";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString("vi-VN");
 };
 
 export default function AdminHome() {
@@ -146,7 +154,12 @@ export default function AdminHome() {
       <View style={styles.wagonRowInner}>
         <View style={styles.wagonRowHeader}>
           <View style={styles.wagonRowSpacer} />
-          <Text style={styles.sectionTitle}>Toa {wagon.wagon_number || 'null'}</Text>
+          <View style={styles.wagonTitleBlock}>
+            <Text style={styles.sectionTitle}>Toa {wagon.wagon_number || 'null'}</Text>
+            <Text style={styles.wagonDetails}>
+              {wagon.wagon_route || "Chưa có tuyến"} · Khởi hành: {formatWagonDate(wagon.wagon_departure_date)} · Đến: {formatWagonDate(wagon.wagon_arrival_date)}
+            </Text>
+          </View>
           <View style={styles.wagonRowSpacer}>
             <TouchableOpacity style={styles.addButton} onPress={() => goToCreateWagonOrder(wagon.WagonID, wagon.wagon_number || '')}>
               <Text style={styles.addButtonText}>Thêm đơn hàng</Text>
@@ -501,6 +514,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 4,
     marginTop: 8,
+  },
+  wagonTitleBlock: {
+    flex: 2,
+    alignItems: 'center',
+  },
+  wagonDetails: {
+    color: '#555',
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 4,
   },
   wagonRowSpacer: {
     flex: 1,

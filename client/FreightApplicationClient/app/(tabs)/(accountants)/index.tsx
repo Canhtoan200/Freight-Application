@@ -45,6 +45,13 @@ export default function AccountantsHome() {
   const [receiverName, setReceiverName] = useState('');
   const [isFocus, setIsFocus] = useState(false);
 
+  const goToOrderDetail = (orderId: number) => {
+    router.push({
+      pathname: '/(tabs)/(accountants)/orderManagement' as any,
+      params: { orderId },
+    });
+  };
+
   useEffect(() => {
     fetchOrders();
   }, []);
@@ -147,8 +154,8 @@ export default function AccountantsHome() {
       <View key={order.OrderID} style={styles.tableRow}>
         <View style={[styles.commonCell, styles.cellLarge]}><Text style={styles.bodyText}>{order.order_name || 'null'}</Text></View>
         <View style={styles.commonCell}><Text style={styles.bodyText}>{order.goods_quantity || '0'}</Text></View>
-        <View style={styles.commonCell}><Text style={styles.bodyText}>{order.receiver_name || 'null'}</Text></View>
         <View style={styles.commonCell}><Text style={styles.bodyText}>{order.sender_name || 'null'}</Text></View>
+        <View style={styles.commonCell}><Text style={styles.bodyText}>{order.receiver_name || 'null'}</Text></View>
         <View style={styles.commonCell}><Text style={styles.bodyText}>{order.driver_name || 'null'}</Text></View>
         <View style={styles.commonCell}><Text style={styles.bodyText}>{order.wagon_number || 'null'}</Text></View>
         <View style={styles.commonCell}>
@@ -160,6 +167,7 @@ export default function AccountantsHome() {
         </View>
         <TouchableOpacity 
           style={[styles.commonCell, styles.lastCell]} 
+          onPress={() => goToOrderDetail(order.OrderID)}
         >
           <Text style={styles.detailLink}>Xem</Text>
         </TouchableOpacity>
@@ -260,8 +268,8 @@ export default function AccountantsHome() {
                 <View style={styles.tableHeader}>
                   <View style={[styles.commonCell, styles.cellLarge]}><Text style={styles.headerText}>Tên hàng</Text></View>
                   <View style={styles.commonCell}><Text style={styles.headerText}>Số lượng</Text></View>
-                  <View style={styles.commonCell}><Text style={styles.headerText}>Chủ nhận</Text></View>
                   <View style={styles.commonCell}><Text style={styles.headerText}>Chủ gửi</Text></View>
+                  <View style={styles.commonCell}><Text style={styles.headerText}>Chủ nhận</Text></View>
                   <View style={styles.commonCell}><Text style={styles.headerText}>Phân công Tài xế</Text></View>
                   <View style={styles.commonCell}><Text style={styles.headerText}>Phân công Toa</Text></View>
                   <View style={styles.commonCell}><Text style={styles.headerText}>Trạng thái</Text></View>

@@ -501,7 +501,10 @@ export default function DriverMapManagement({ readOnly = false }: DriverMapManag
       if (!active) return;
 
       const groups = new Map<string, typeof locatedDrivers>();
-      for (const locatedDriver of locatedDrivers) {
+      const unselectedDrivers = locatedDrivers.filter(
+        ({ driver }) => driver.DriverIDs !== selectedDriver?.DriverIDs,
+      );
+      for (const locatedDriver of unselectedDrivers) {
         const key = locatedDriver.coordinate.map((value) => value.toFixed(5)).join(',');
         const group = groups.get(key) ?? [];
         group.push(locatedDriver);
@@ -586,7 +589,7 @@ export default function DriverMapManagement({ readOnly = false }: DriverMapManag
       allDriverMarkersRef.current.forEach((marker) => marker.remove());
       allDriverMarkersRef.current = [];
     };
-  }, [drivers, mapReady]);
+  }, [drivers, mapReady, selectedDriver]);
 
   const handleSelectOrder = async (order: Order) => {
     const requestID = ++orderRequestRef.current;

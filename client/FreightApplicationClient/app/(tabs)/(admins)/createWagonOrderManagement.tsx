@@ -68,13 +68,12 @@ export default function CreateWagonOrderManagement() {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ WagonIDs: Number(wagonId), OrderIDs: [orderId] }),
+          body: JSON.stringify({ WagonIDs: Number(wagonId), OrderIDs: orderId }),
         }
       );
       const data = await response.json();
-      if (response.ok) {
-        Alert.alert("Thành công", `Đã thêm đơn hàng vào toa ${wagonNumber || wagonId}.`);
-        router.back();
+      if (response.ok && data.affectedRows > 0) {
+        router.replace("/(tabs)/(admins)" as any);
       } else {
         Alert.alert("Lỗi", data.message || "Không thể thêm đơn hàng vào toa.");
       }

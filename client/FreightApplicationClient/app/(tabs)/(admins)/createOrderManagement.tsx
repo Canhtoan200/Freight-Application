@@ -61,11 +61,17 @@ export default function CreateOrder() {
     };
 
     try {
+      const rawUser = await AsyncStorage.getItem('userToken');
+      const user = rawUser ? JSON.parse(rawUser) as { token?: string } : null;
+      if (!user?.token) {
+        throw new Error('Vui lòng đăng nhập lại trước khi tạo đơn hàng.');
+      }
       const response = await fetch('https://freight-application-server.onrender.com/api/v1/orders/createGuestOrder', {
         method: 'POST',
         headers: {
           'Accept': 'application/json',
           'Content-Type': 'application/json',
+          Authorization: `Bearer ${user.token}`,
         },
         body: JSON.stringify(orderData),
       });

@@ -41,7 +41,6 @@ const GOONG_API_KEY = process.env.EXPO_PUBLIC_GOONG_API_KEY ?? '';
 const GOONG_STYLE_URL = `https://tiles.goong.io/assets/goong_map_web.json?api_key=${encodeURIComponent(GOONG_MAPTILES_KEY)}`;
 const INITIAL_COORDINATE: Coordinate = [106.7009, 10.7769];
 const DRIVER_START_ADDRESS = 'KDC Nam Thịnh, An Bình, Dĩ An, Bình Dương';
-const STATION_ADDRESS = 'Ga Sóng Thần, Dĩ An, Bình Dương';
 const STATUS_HEADING_TO_PICKUP = 'Tài xế đang đi!';
 const STATUS_PICKED_UP = 'Đã nhận hàng';
 const STATUS_ARRIVED_AT_STATION = 'Đã tới ga';
@@ -149,10 +148,16 @@ export default function DriverMap() {
     setSimulationProgress(0);
     setSimulationStarted(false);
 
-    if (order.shipping_status === STATUS_ARRIVED_AT_STATION || order.shipping_status === STATUS_LOADED_ON_WAGON) {
+    if (
+      order.shipping_status === STATUS_PICKED_UP
+      || order.shipping_status === STATUS_ARRIVED_AT_STATION
+      || order.shipping_status === STATUS_LOADED_ON_WAGON
+    ) {
       setErrorMessage(order.shipping_status === STATUS_ARRIVED_AT_STATION
-        ? 'Đã tới ga. Đơn hàng đang chờ admin xếp toa.'
-        : 'Đơn hàng đã được xếp lên toa.');
+          ? 'Đã tới ga. Đơn hàng đang chờ admin xếp toa.'
+          : order.shipping_status === STATUS_LOADED_ON_WAGON
+            ? 'Đơn hàng đã được xếp lên toa.'
+            : '');
       return;
     }
 
@@ -172,8 +177,7 @@ export default function DriverMap() {
       return;
     }
 
-    const originAddress =
-      order.shipping_status === STATUS_PICKED_UP ? order.sender_address : DRIVER_START_ADDRESS;
+    const originAddress = DRIVER_START_ADDRESS;
     if (!originAddress) {
       setErrorMessage(`Đơn hàng #${order.OrderID} chưa có địa chỉ người gửi.`);
       return;
@@ -242,9 +246,7 @@ export default function DriverMap() {
     if (!selectedOrder || updatingOrderID !== null || !simulationStarted || simulating || simulationProgress < 1) return;
     const nextStatus = selectedOrder.shipping_status === STATUS_HEADING_TO_PICKUP
       ? STATUS_PICKED_UP
-      : selectedOrder.shipping_status === STATUS_PICKED_UP
-        ? STATUS_ARRIVED_AT_STATION
-        : null;
+      : null;
     if (!nextStatus) return;
 
     setUpdatingOrderID(selectedOrder.OrderID);
@@ -262,13 +264,12 @@ export default function DriverMap() {
       setOrders((current) => current.map((order) =>
         order.OrderID === updatedOrder.OrderID ? updatedOrder : order,
       ));
-      if (nextStatus === STATUS_PICKED_UP) {
-        await selectOrder(updatedOrder);
-      } else {
-        setRoute(null);
-        setSelectedOrderCoordinate(null);
-        setErrorMessage('Đã cập nhật trạng thái: Đã tới ga. Chờ admin xếp toa tàu.');
-      }
+      setRoute(null);
+      setSelectedOrderCoordinate(null);
+      setSimulatedDriverCoordinate(null);
+      setSimulationStarted(false);
+      setSimulationProgress(0);
+      setErrorMessage('Đã nhận hàng. Bạn có thể tiếp tục chọn đơn khác trước khi tới ga.');
     } catch (error) {
       console.error('Không thể cập nhật tiến độ giao hàng:', error);
       setErrorMessage(error instanceof Error ? error.message : 'Không thể cập nhật trạng thái.');
@@ -364,22 +365,28 @@ export default function DriverMap() {
 
       <View style={styles.coordinateCard}>
         <Text style={styles.coordinateTitle}>Vị trí mô phỏng · KDC Nam Thịnh</Text>
-        {!!selectedDestination && (
+        {selectedOrder?.shipping_status === STATUS_PICKED_UP ? (
           <Text style={styles.coordinateText}>
-            {selectedOrder?.shipping_status === STATUS_PICKED_UP ? 'Điểm đến tiếp theo' : 'Điểm nhận hàng'}: {selectedDestination}
+            Đã nhận hàng · có thể tiếp tục nhận đơn khác trước khi tới ga.
+          </Text>
+        ) : !!selectedDestination && (
+          <Text style={styles.coordinateText}>
+            Điểm nhận hàng: {selectedDestination}
           </Text>
         )}
-        <Text style={styles.coordinateText}>
-          {route
-            ? simulating
-              ? `Đang mô phỏng · ${Math.floor(simulationProgress * 100)}%`
-              : simulationStarted && simulationProgress >= 1
-                ? 'Đã đến nơi · xác nhận để cập nhật trạng thái'
-                : 'Đã có tuyến đường · xác nhận đơn để bắt đầu mô phỏng'
-            : 'Đang tải tuyến đường...'}
-          {' · '}{route?.distanceText || '—'} · ETA {route?.durationText || '—'}
-        </Text>
-        {!!selectedOrder && (
+        {selectedOrder?.shipping_status === STATUS_HEADING_TO_PICKUP && (
+          <Text style={styles.coordinateText}>
+            {route
+              ? simulating
+                ? `Đang mô phỏng · ${Math.floor(simulationProgress * 100)}%`
+                : simulationStarted && simulationProgress >= 1
+                  ? 'Đã đến nơi · xác nhận để cập nhật trạng thái'
+                  : 'Đã có tuyến đường · xác nhận đơn để bắt đầu mô phỏng'
+              : 'Đang tải tuyến đường...'}
+            {' · '}{route?.distanceText || '—'} · ETA {route?.durationText || '—'}
+          </Text>
+        )}
+        {selectedOrder?.shipping_status === STATUS_HEADING_TO_PICKUP && (
           <TouchableOpacity
             style={[styles.advanceButton, (!route || simulating) && styles.disabledButton]}
             onPress={() => {
@@ -390,8 +397,7 @@ export default function DriverMap() {
               updatingOrderID === selectedOrder.OrderID ||
               !route ||
               simulating ||
-              (simulationStarted && simulationProgress < 1) ||
-              selectedOrder.shipping_status === STATUS_ARRIVED_AT_STATION
+              (simulationStarted && simulationProgress < 1)
             }
           >
             {updatingOrderID === selectedOrder.OrderID
@@ -400,14 +406,8 @@ export default function DriverMap() {
                 ? <Text style={styles.advanceButtonText}>Đang mô phỏng...</Text>
               : <Text style={styles.advanceButtonText}>
                   {!simulationStarted
-                    ? selectedOrder.shipping_status === STATUS_PICKED_UP
-                      ? 'Xác nhận đơn · mô phỏng đến ga'
-                      : 'Xác nhận đơn hàng'
-                    : selectedOrder.shipping_status === STATUS_HEADING_TO_PICKUP
-                      ? 'Xác nhận đã nhận hàng'
-                      : selectedOrder.shipping_status === STATUS_PICKED_UP
-                        ? 'Xác nhận đã tới ga'
-                        : 'Đã tới ga · chờ admin xếp toa'}
+                    ? 'Xác nhận đơn hàng'
+                    : 'Xác nhận đã nhận hàng'}
                 </Text>}
           </TouchableOpacity>
         )}
@@ -471,10 +471,12 @@ async function fetchOrderByID(orderID: number): Promise<Order> {
 }
 
 function getDestinationAddress(order: Order): string | null {
-  if (order.shipping_status === STATUS_ARRIVED_AT_STATION || order.shipping_status === STATUS_LOADED_ON_WAGON) {
-    return null;
-  }
-  return order.shipping_status === STATUS_PICKED_UP ? STATION_ADDRESS : order.sender_address ?? null;
+  if (
+    order.shipping_status === STATUS_PICKED_UP
+    || order.shipping_status === STATUS_ARRIVED_AT_STATION
+    || order.shipping_status === STATUS_LOADED_ON_WAGON
+  ) return null;
+  return order.sender_address ?? null;
 }
 
 async function fetchDrivingRoute(from: Coordinate, to: Coordinate): Promise<RouteResult> {
