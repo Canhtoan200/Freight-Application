@@ -49,7 +49,9 @@ const SIMULATION_DURATION_MS = 45_000;
 const SIMULATION_TICK_MS = 500;
 const SERVER_URL = 'https://freight-application-server.onrender.com/api/v1';
 
-export default function DriverMap() {
+type DriverMapProps = { partnerMode?: boolean };
+
+export default function DriverMap({ partnerMode = false }: DriverMapProps) {
   const cameraRef = useRef<CameraRef | null>(null);
   const simulationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const insets = useSafeAreaInsets();
@@ -93,7 +95,7 @@ export default function DriverMap() {
     const loadMapData = async () => {
       try {
         const [fetchedOrders, coordinate] = await Promise.all([
-          loadDriverOrders(),
+          loadDriverOrders(partnerMode),
           geocodeAddress(DRIVER_START_ADDRESS),
         ]);
         if (!mounted) return;
@@ -119,7 +121,7 @@ export default function DriverMap() {
     return () => {
       mounted = false;
     };
-  }, [canRenderMap]);
+  }, [canRenderMap, partnerMode]);
 
   useEffect(() => () => {
     if (simulationTimerRef.current !== null) clearInterval(simulationTimerRef.current);
@@ -433,18 +435,20 @@ export default function DriverMap() {
   );
 }
 
-async function loadDriverOrders(): Promise<Order[]> {
+async function loadDriverOrders(partnerMode: boolean): Promise<Order[]> {
   const raw = await AsyncStorage.getItem('userToken');
   const user = raw ? JSON.parse(raw) as { userID?: number } : null;
   if (!user?.userID) throw new Error('Vui lòng đăng nhập lại để tải đơn được phân công.');
 
-  const driverID = await fetchDriverID(user.userID);
-  const orderIDs = await fetchDriverOrderIDs(driverID);
+  const driverID = await fetchDriverID(user.userID, partnerMode);
+  const orderIDs = await fetchDriverOrderIDs(driverID, partnerMode);
   return Promise.all(orderIDs.map(fetchOrderByID));
 }
 
-async function fetchDriverID(userID: number): Promise<number> {
-  const response = await fetch(`${SERVER_URL}/drivers/getDriverIDBasedOnUserID?userID=${userID}`);
+async function fetchDriverID(userID: number, partnerMode: boolean): Promise<number> {
+  const response = await fetch(partnerMode
+    ? `${SERVER_URL}/drivers/getDriverPartnerIDBasedOnUserID?userID=${userID}`
+    : `${SERVER_URL}/drivers/getDriverIDBasedOnUserID?userID=${userID}`);
   const payload = await response.json();
   if (!response.ok || typeof payload.data !== 'number') {
     throw new Error(payload.message || 'Không tìm thấy hồ sơ tài xế.');
@@ -452,8 +456,10 @@ async function fetchDriverID(userID: number): Promise<number> {
   return payload.data;
 }
 
-async function fetchDriverOrderIDs(driverID: number): Promise<number[]> {
-  const response = await fetch(`${SERVER_URL}/drivers/getDriverOrderBasedOnDriverID?driverID=${driverID}`);
+async function fetchDriverOrderIDs(driverID: number, partnerMode: boolean): Promise<number[]> {
+  const response = await fetch(partnerMode
+    ? `${SERVER_URL}/drivers/getDriverPartnerOrdersByID?driverPartnerID=${driverID}`
+    : `${SERVER_URL}/drivers/getDriverOrderBasedOnDriverID?driverID=${driverID}`);
   const payload = await response.json();
   if (!response.ok || !Array.isArray(payload.data)) {
     throw new Error(payload.message || 'Không thể tải danh sách đơn được phân công.');

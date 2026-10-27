@@ -21,9 +21,36 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Trang chủ',
+          title: 'Tổng hợp kế hoạch',
           tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'home-sharp' : 'home-outline'} color={color} size={24} />
+            <Ionicons name={focused ? 'stats-chart-sharp' : 'stats-chart-outline'} color={color} size={24} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="accountantDetail"
+        options={{
+          title: 'Kế toán',
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'calculator-sharp' : 'calculator-outline'} color={color} size={24} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="employeeSalary"
+        options={{
+          title: 'Lương nhân viên',
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'wallet-sharp' : 'wallet-outline'} color={color} size={24} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="driverManagement"
+        options={{
+          title: 'Tài xế',
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'car-sharp' : 'car-outline'} color={color} size={24} />
           ),
         }}
       />
@@ -36,6 +63,11 @@ export default function TabLayout() {
           ),
         }}
       />
+      <Tabs.Screen name="orderManagement" options={{ title: 'Chi tiết đơn hàng', tabBarStyle: { display: 'none' }, href: null }} />
+      <Tabs.Screen name="createOrderManagement" options={{ title: 'Tạo đơn hàng mới', tabBarStyle: { display: 'none' }, href: null }} />
+      <Tabs.Screen name="DriverMapManagement" options={{ title: 'Quản lý đội xe', tabBarStyle: { display: 'none' }, href: null }} />
+      <Tabs.Screen name="createWagonManagement" options={{ title: 'Tạo toa tàu mới', tabBarStyle: { display: 'none' }, href: null }} />
+      <Tabs.Screen name="createWagonOrderManagement" options={{ title: 'Tạo đơn hàng cho toa tàu', tabBarStyle: { display: 'none' }, href: null }} />
     </Tabs>
   );
 }

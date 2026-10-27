@@ -10,7 +10,8 @@ import {
   Platform,
   Modal,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { useSegments } from "expo-router";
 import DateTimePicker, {
   DateTimePickerAndroid,
 } from "@react-native-community/datetimepicker";
@@ -20,6 +21,7 @@ type WagonPayload = {
   wagon_route: string;
   wagon_departure_date: string;
   wagon_arrival_date: string;
+  wagon_type: "LOADING" | "UNLOADING";
 };
 
 function formatDate(date: Date) {
@@ -81,6 +83,13 @@ function WebDateTimeInput({ value, onChange, minimum, maximum }: WebDateTimeInpu
 
 export default function CreateWagonManagement() {
   const router = useRouter();
+  const { wagonType: requestedWagonType } = useLocalSearchParams<{ wagonType?: string }>();
+  const wagonType: WagonPayload["wagon_type"] =
+    requestedWagonType?.toUpperCase() === "UNLOADING" ? "UNLOADING" : "LOADING";
+  const segments = useSegments();
+  const homeRoute = segments.some((segment) => String(segment) === "(businessPartners)")
+    ? "/(tabs)/(businessPartners)"
+    : "/(tabs)/(admins)";
 
   const [wagonNumber, setWagonNumber] = useState("");
   const [wagonRoute, setWagonRoute] = useState("");
@@ -169,6 +178,7 @@ export default function CreateWagonManagement() {
       wagon_route: wagonRoute.trim(),
       wagon_departure_date: formatDate(departureDate),
       wagon_arrival_date: formatDate(arrivalDate),
+      wagon_type: wagonType,
     };
 
     setLoading(true);
@@ -187,7 +197,7 @@ export default function CreateWagonManagement() {
       const data = await response.json();
 
       if (response.ok) {
-        router.replace("/(tabs)/(admins)" as any);
+        router.replace(homeRoute as any);
       } else {
         Alert.alert("Lỗi", data.message || "Tạo toa tàu thất bại");
       }
@@ -213,7 +223,9 @@ export default function CreateWagonManagement() {
 
       {/* Form */}
       <View style={styles.formBox}>
-        <Text style={styles.sectionTitle}>Tạo toa tàu mới</Text>
+        <Text style={styles.sectionTitle}>
+          Tạo toa tàu {wagonType === "LOADING" ? "xếp" : "dỡ"}
+        </Text>
 
         {/* Wagon Number */}
         <View style={styles.inputGroup}>

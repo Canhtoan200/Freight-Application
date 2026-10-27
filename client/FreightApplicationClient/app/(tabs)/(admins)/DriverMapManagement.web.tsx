@@ -86,6 +86,7 @@ type TrackingPanelProps = {
 
 type DriverMapManagementProps = {
   readOnly?: boolean;
+  partnerMode?: boolean;
 };
 
 const GOONG_MAPTILES_KEY = process.env.EXPO_PUBLIC_GOONG_MAPTILES_KEY ?? '';
@@ -226,8 +227,10 @@ async function fetchFleetOrders(): Promise<Order[]> {
   return payload.data.filter((order) => ACTIVE_FLEET_STATUSES.has(order.shipping_status ?? ''));
 }
 
-async function fetchDrivers(): Promise<Driver[]> {
-  const response = await fetch(DRIVERS_URL);
+async function fetchDrivers(partnerMode: boolean): Promise<Driver[]> {
+  const response = await fetch(partnerMode
+    ? 'https://freight-application-server.onrender.com/api/v1/drivers/getAllDriverPartners'
+    : DRIVERS_URL);
   const payload = (await response.json()) as { data?: Driver[]; message?: string };
 
   if (!response.ok) {
@@ -304,7 +307,10 @@ const loadMapLibre = async () => {
   });
 };
 
-export default function DriverMapManagement({ readOnly = false }: DriverMapManagementProps) {
+export default function DriverMapManagement({
+  readOnly = false,
+  partnerMode = false,
+}: DriverMapManagementProps) {
   const insets = useSafeAreaInsets();
   const mapContainerRef = useRef<any>(null);
   const mapRef = useRef<any>(null);
@@ -367,7 +373,7 @@ export default function DriverMapManagement({ readOnly = false }: DriverMapManag
         if (active) setOrdersLoading(false);
       });
 
-    fetchDrivers()
+    fetchDrivers(partnerMode)
       .then((driverList) => {
         if (active) setDrivers(driverList);
       })
@@ -381,7 +387,7 @@ export default function DriverMapManagement({ readOnly = false }: DriverMapManag
       orderRequestRef.current += 1;
       driverRequestRef.current += 1;
     };
-  }, [readOnly]);
+  }, [readOnly, partnerMode]);
 
   useEffect(() => {
     if (!readOnly) return;
@@ -816,11 +822,15 @@ export default function DriverMapManagement({ readOnly = false }: DriverMapManag
     setErrorMessage('');
 
     try {
-      const response = await fetch(ASSIGN_DRIVER_URL, {
+      const response = await fetch(partnerMode
+        ? 'https://freight-application-server.onrender.com/api/v1/drivers/createDriverPartnerOrderDetail'
+        : ASSIGN_DRIVER_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          DriverIDs: selectedDriver.DriverIDs,
+          ...(partnerMode
+            ? { DriverPartnerIDs: selectedDriver.DriverIDs }
+            : { DriverIDs: selectedDriver.DriverIDs }),
           OrderIDs: [selectedOrder.OrderID],
         }),
       });

@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from "react";
-import { useFocusEffect } from "expo-router";
-import { ScrollView, StyleSheet, Text, View, TouchableOpacity } from "react-native";
+import { useFocusEffect, useSegments } from "expo-router";
+import { Alert, ScrollView, StyleSheet, Text, View, TouchableOpacity } from "react-native";
 import { useRouter } from 'expo-router';
 
 type Order = {
@@ -18,6 +18,7 @@ type Wagon = {
   WagonID: number;
   wagon_number?: string;
   wagon_route?: string;
+  wagon_type?: string;
   wagon_departure_date?: string | Date;
   wagon_arrival_date?: string | Date;
 };
@@ -30,11 +31,17 @@ const formatWagonDate = (value?: string | Date) => {
 
 export default function AdminHome() {
   const router = useRouter();
+  const segments = useSegments();
+  const isBusinessPartner = segments.some((segment) => String(segment) === "(businessPartners)");
+  const routePrefix = isBusinessPartner
+    ? "/(tabs)/(businessPartners)"
+    : "/(tabs)/(admins)";
   const [orders, setOrders] = useState<Order[]>([]);
   const [wagons, setWagons] = useState<Wagon[]>([]);
   const [wagonOrderMap, setWagonOrderMap] = useState<Record<number, Order[]>>({});
   const [loading, setLoading] = useState(true);
   const [wagonLoading, setWagonLoading] = useState(true);
+  const [transitioningWagonID, setTransitioningWagonID] = useState<number | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -105,24 +112,60 @@ export default function AdminHome() {
     }
   };
   const goToCreateOrder = () => {
-    router.push('/(tabs)/(admins)/createOrderManagement');
+    router.push(`${routePrefix}/createOrderManagement` as any);
   };
   const goToCreateWagonOrder = (wagonId: number, wagonNumber: string) => {
     router.push({
-      pathname: '/(tabs)/(admins)/createWagonOrderManagement' as any,
+      pathname: `${routePrefix}/createWagonOrderManagement` as any,
       params: { wagonId, wagonNumber },
     });
   };
   const goToOrderDetail = (orderId: number) => {
     router.push({
-      pathname: '/(tabs)/(admins)/orderManagement' as any,
+      pathname: `${routePrefix}/orderManagement` as any,
       params: { orderId }
     });
   };
 
-  const goToCreateWagon = () => {
-    router.push('/(tabs)/(admins)/createWagonManagement');
+  const goToCreateWagon = (wagonType: "LOADING" | "UNLOADING") => {
+    router.push({
+      pathname: `${routePrefix}/createWagonManagement` as any,
+      params: { wagonType },
+    });
   };
+
+  const moveWagonToUnloading = async (wagon: Wagon) => {
+    if (transitioningWagonID !== null) return;
+    setTransitioningWagonID(wagon.WagonID);
+    try {
+      const response = await fetch(
+        "https://freight-application-server.onrender.com/api/v1/wagons/convertToUnloading",
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ WagonID: wagon.WagonID }),
+        }
+      );
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || "Không thể chuyển toa sang toa dỡ.");
+      }
+      setWagons((current) => current.map((item) =>
+        item.WagonID === wagon.WagonID ? { ...item, wagon_type: "UNLOADING" } : item
+      ));
+      Alert.alert("Thành công", `Toa ${wagon.wagon_number || ""} đã được chuyển sang danh sách toa dỡ.`);
+    } catch (error) {
+      console.error("Không thể chuyển toa xếp sang toa dỡ:", error);
+      Alert.alert("Lỗi", error instanceof Error ? error.message : "Không thể chuyển toa sang toa dỡ.");
+    } finally {
+      setTransitioningWagonID(null);
+    }
+  };
+
+  const loadingWagons = wagons.filter(
+    (wagon) => (wagon.wagon_type ?? "LOADING").toUpperCase() === "LOADING"
+  );
+  const unloadingWagons = wagons.filter((wagon) => wagon.wagon_type?.toUpperCase() === "UNLOADING");
 
   const renderOrderRow = (order: Order) => (
     <View key={order.OrderID} style={styles.tableRow}>
@@ -160,10 +203,23 @@ export default function AdminHome() {
               {wagon.wagon_route || "Chưa có tuyến"} · Khởi hành: {formatWagonDate(wagon.wagon_departure_date)} · Đến: {formatWagonDate(wagon.wagon_arrival_date)}
             </Text>
           </View>
-          <View style={styles.wagonRowSpacer}>
+          <View style={[styles.wagonRowSpacer, styles.wagonActions]}>
             <TouchableOpacity style={styles.addButton} onPress={() => goToCreateWagonOrder(wagon.WagonID, wagon.wagon_number || '')}>
               <Text style={styles.addButtonText}>Thêm đơn hàng</Text>
             </TouchableOpacity>
+            {(wagon.wagon_type ?? "LOADING").toUpperCase() === "LOADING" && (
+              <TouchableOpacity
+                style={[styles.addButtonSmall, transitioningWagonID === wagon.WagonID && styles.disabledButton]}
+                disabled={transitioningWagonID === wagon.WagonID}
+                onPress={() => moveWagonToUnloading(wagon)}
+              >
+                <Text style={styles.addButtonText}>
+                  {transitioningWagonID === wagon.WagonID
+                    ? "Đang chuyển..."
+                    : "Chuyển sang toa dỡ"}
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
         <View style={styles.tableHeaderWrapper}>
@@ -216,6 +272,11 @@ export default function AdminHome() {
   );
   return (
       <ScrollView contentContainerStyle={styles.container}>
+        {isBusinessPartner && (
+          <Text style={{ marginBottom: 12, fontWeight: '700', color: '#333' }}>
+            Ga Giáp Bát · Tiếp nhận và dỡ toa
+          </Text>
+        )}
         <View style={styles.headerBox}>
           <View style={styles.logoBox}>
             <Text style={styles.logoText}>Logo công ty</Text>
@@ -265,22 +326,38 @@ export default function AdminHome() {
           </View>
 
           <View style={styles.headerActions}>
-            <TouchableOpacity style={styles.addButton} onPress={goToCreateWagon}>
-              <Text style={styles.addButtonText}>Thêm toa tàu</Text>
+            <TouchableOpacity style={styles.addButton} onPress={() => goToCreateWagon("LOADING")}>
+              <Text style={styles.addButtonText}>Thêm toa xếp</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.addButton} onPress={() => goToCreateWagon("UNLOADING")}>
+              <Text style={styles.addButtonText}>Thêm toa dỡ</Text>
             </TouchableOpacity>
           </View>
         </View>
-        <View style={styles.sectionBox}>
-          <View style={styles.tableBody}>
-            {loading ? (
-              <Text style={styles.emptyText}>Đang tải...</Text>
-            ) : wagons.length > 0 ? (
-              wagons.map(renderWagonRow)
-            ) : (
-              <Text style={styles.emptyText}>Chưa có toa tàu</Text>
-            )}
+          <View style={styles.sectionBox}>
+            <Text style={styles.sectionTitle}>Danh sách toa tàu xếp</Text>
+            <View style={styles.tableBody}>
+              {wagonLoading ? (
+                <Text style={styles.emptyText}>Đang tải...</Text>
+              ) : loadingWagons.length > 0 ? (
+                loadingWagons.map(renderWagonRow)
+              ) : (
+                <Text style={styles.emptyText}>Chưa có toa tàu xếp</Text>
+              )}
+            </View>
           </View>
-        </View>
+          <View style={styles.sectionBox}>
+            <Text style={styles.sectionTitle}>Danh sách toa tàu dỡ</Text>
+            <View style={styles.tableBody}>
+              {wagonLoading ? (
+                <Text style={styles.emptyText}>Đang tải...</Text>
+              ) : unloadingWagons.length > 0 ? (
+                unloadingWagons.map(renderWagonRow)
+              ) : (
+                <Text style={styles.emptyText}>Chưa có toa tàu dỡ</Text>
+              )}
+            </View>
+          </View>
       </ScrollView>
   );
 }
@@ -359,6 +436,9 @@ const styles = StyleSheet.create({
   addButtonText: {
     color: '#fff',
     fontWeight: '600',
+  },
+  disabledButton: {
+    opacity: 0.5,
   },
   addButtonSmall: {
     borderWidth: 1,
@@ -528,5 +608,8 @@ const styles = StyleSheet.create({
   wagonRowSpacer: {
     flex: 1,
     alignItems: 'flex-end',
+  },
+  wagonActions: {
+    gap: 6,
   },
 });

@@ -134,15 +134,17 @@ const IS_EXPO_GO =
   Constants.executionEnvironment === 'storeClient';
 const API_ENDPOINTS = {
   ordersByStatus: `${SERVER_URL}/orders/getAllOrderByStatus?shipping_status=${encodeURIComponent('Đã tiếp nhận')}`,
-  drivers: `${SERVER_URL}/drivers/getAllDrivers`,
-  assignDriver: `${SERVER_URL}/drivers/createDriverOrderDetail`,
 };
 
 type DriverMapManagementProps = {
   readOnly?: boolean;
+  partnerMode?: boolean;
 };
 
-export default function DriverMapManagement({ readOnly = false }: DriverMapManagementProps) {
+export default function DriverMapManagement({
+  readOnly = false,
+  partnerMode = false,
+}: DriverMapManagementProps) {
   const insets = useSafeAreaInsets();
   const cameraRef = useRef<CameraRef | null>(null);
   const geocodeCacheRef = useRef(new globalThis.Map<string, Coordinate>());
@@ -180,7 +182,7 @@ export default function DriverMapManagement({ readOnly = false }: DriverMapManag
   useEffect(() => {
     let active = true;
 
-    Promise.all([readOnly ? fetchFleetOrders() : fetchOrders(), fetchDrivers()])
+    Promise.all([readOnly ? fetchFleetOrders() : fetchOrders(), fetchDrivers(partnerMode)])
       .then(([orderList, driverList]) => {
         if (!active) return;
         setOrders(orderList);
@@ -197,7 +199,7 @@ export default function DriverMapManagement({ readOnly = false }: DriverMapManag
     return () => {
       active = false;
     };
-  }, [readOnly]);
+  }, [readOnly, partnerMode]);
 
   useEffect(() => {
     if (!readOnly) return;
@@ -405,7 +407,7 @@ export default function DriverMapManagement({ readOnly = false }: DriverMapManag
     setAssigning(true);
     setErrorMessage('');
     try {
-      await assignDriverToOrder(selectedDriver.DriverIDs, selectedOrder.OrderID);
+      await assignDriverToOrder(selectedDriver.DriverIDs, selectedOrder.OrderID, partnerMode);
       setOrders((currentOrders) =>
         currentOrders.filter((order) => order.OrderID !== selectedOrder.OrderID),
       );
@@ -906,18 +908,25 @@ async function fetchFleetOrders(): Promise<Order[]> {
   return payload.data.filter((order: Order) => ACTIVE_FLEET_STATUSES.has(order.shipping_status ?? ''));
 }
 
-async function fetchDrivers(): Promise<Driver[]> {
-  const response = await fetch(API_ENDPOINTS.drivers);
+async function fetchDrivers(partnerMode: boolean): Promise<Driver[]> {
+  const response = await fetch(partnerMode
+    ? `${SERVER_URL}/drivers/getAllDriverPartners`
+    : `${SERVER_URL}/drivers/getAllDrivers`);
   const payload = await parseResponse(response);
   if (!response.ok) throw new Error(payload?.message || 'Không thể tải tài xế');
   return Array.isArray(payload?.data) ? payload.data : [];
 }
 
-async function assignDriverToOrder(driverID: number, orderID: number) {
-  const response = await fetch(API_ENDPOINTS.assignDriver, {
+async function assignDriverToOrder(driverID: number, orderID: number, partnerMode: boolean) {
+  const response = await fetch(partnerMode
+    ? `${SERVER_URL}/drivers/createDriverPartnerOrderDetail`
+    : `${SERVER_URL}/drivers/createDriverOrderDetail`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ DriverIDs: driverID, OrderIDs: [orderID] }),
+    body: JSON.stringify({
+      ...(partnerMode ? { DriverPartnerIDs: driverID } : { DriverIDs: driverID }),
+      OrderIDs: [orderID],
+    }),
   });
   const payload = await parseResponse(response);
   if (

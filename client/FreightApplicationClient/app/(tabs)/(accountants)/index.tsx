@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Alert, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { useRouter } from 'expo-router';
+import { useRouter, useSegments } from 'expo-router';
 import AntDesign from '@expo/vector-icons/AntDesign';
 import { Dropdown } from 'react-native-element-dropdown';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -37,6 +37,11 @@ const dropdownOptions = [
 
 export default function AccountantsHome() {
   const router = useRouter();
+  const segments = useSegments();
+  const isPartnerAccountant = segments.some((segment) => String(segment) === '(accountantPartners)');
+  const routePrefix = isPartnerAccountant
+    ? '/(tabs)/(accountantPartners)'
+    : '/(tabs)/(accountants)';
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [value, setValue] = useState('1 week ago');
@@ -47,7 +52,7 @@ export default function AccountantsHome() {
 
   const goToOrderDetail = (orderId: number) => {
     router.push({
-      pathname: '/(tabs)/(accountants)/orderManagement' as any,
+      pathname: `${routePrefix}/orderManagement` as any,
       params: { orderId },
     });
   };

@@ -26,8 +26,12 @@ export default function TabsLayout() {
       const routeMap: Record<string, string> = {
         'Admin': '/(admins)',
         'Accountant': '/(accountants)',
+        'Accountant Partner': '/(accountantPartners)',
+        'AccountantPartner': '/(accountantPartners)',
         'Partner': '/(businessPartners)',
         'Driver': '/(drivers)',
+        'Driver Partner': '/(driverPartners)',
+        'DriverPartner': '/(driverPartners)',
         'Guest': '/(guests)',
         'QAStaff': '/(QAStaffs)'
       };

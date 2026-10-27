@@ -223,7 +223,7 @@ export default function OrderDetail() {
                 <Text style={styles.sectionTitle}>Thông tin giao hàng</Text>
                 <Text style={styles.label}>Hướng xử lý:</Text>
                 <Text style={styles.value}>{order.handling_instruction || "Không có"}</Text>
-                {order.shipping_status !== "Đã lên toa" && (
+                {!["Đã lên toa", "Đã dỡ toa"].includes(order.shipping_status) && (
                     <>
                         <Text style={styles.label}>Tài xế:</Text>
                         <Text style={styles.value}>{order.driver_name || "Chưa có"}</Text>

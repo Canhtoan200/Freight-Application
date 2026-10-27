@@ -10,7 +10,7 @@ import {
   Modal,
   Pressable,
 } from "react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter, useSegments } from "expo-router";
 
 type Order = {
   OrderID: number;
@@ -25,6 +25,10 @@ type Order = {
 
 export default function CreateWagonOrderManagement() {
   const router = useRouter();
+  const segments = useSegments();
+  const homeRoute = segments.some((segment) => String(segment) === "(businessPartners)")
+    ? "/(tabs)/(businessPartners)"
+    : "/(tabs)/(admins)";
   const { wagonId, wagonNumber } = useLocalSearchParams<{
     wagonId: string;
     wagonNumber: string;
@@ -73,7 +77,7 @@ export default function CreateWagonOrderManagement() {
       );
       const data = await response.json();
       if (response.ok && data.affectedRows > 0) {
-        router.replace("/(tabs)/(admins)" as any);
+        router.replace(homeRoute as any);
       } else {
         Alert.alert("Lỗi", data.message || "Không thể thêm đơn hàng vào toa.");
       }
@@ -89,6 +93,7 @@ export default function CreateWagonOrderManagement() {
     "Đã tiếp nhận",
     "Đang vận chuyển",
     "Đã lên toa",
+    "Đã dỡ toa",
     "Đã giao hàng",
   ];
 

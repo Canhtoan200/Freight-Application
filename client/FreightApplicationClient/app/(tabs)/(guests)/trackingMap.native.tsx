@@ -184,7 +184,7 @@ export default function GuestTrackingMap() {
               >
                 <Text style={styles.orderTitle}>#{order.OrderID} · {order.order_name || order.sender_name || 'Đơn hàng'}</Text>
                 <Text style={styles.muted}>{order.shipping_status || 'Chưa có trạng thái'}</Text>
-                {order.shipping_status !== 'Đã lên toa' && (
+                {!['Đã lên toa', 'Đã dỡ toa'].includes(order.shipping_status ?? '') && (
                   <Text style={styles.muted}>{order.driver_name || 'Chưa phân công tài xế'}</Text>
                 )}
               </TouchableOpacity>

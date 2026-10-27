@@ -28,7 +28,9 @@ const SIMULATION_TICK_MS = 500;
 const MAPLIBRE_JS = 'https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.js';
 const MAPLIBRE_CSS = 'https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.css';
 
-export default function DriverMap() {
+type DriverMapProps = { partnerMode?: boolean };
+
+export default function DriverMap({ partnerMode = false }: DriverMapProps) {
   const insets = useSafeAreaInsets();
   const mapContainer = useRef<any>(null);
   const mapRef = useRef<any>(null);
@@ -65,7 +67,7 @@ export default function DriverMap() {
 
   useEffect(() => {
     let active = true;
-    void loadAssignedOrders()
+    void loadAssignedOrders(partnerMode)
       .then((items) => {
         if (!active) return;
         setOrders(items.filter((order) => order.shipping_status !== LOADED_ON_WAGON));
@@ -77,7 +79,7 @@ export default function DriverMap() {
       })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, []);
+  }, [partnerMode]);
 
   useEffect(() => {
     let active = true;
@@ -352,17 +354,21 @@ export default function DriverMap() {
   );
 }
 
-async function loadAssignedOrders(): Promise<Order[]> {
+async function loadAssignedOrders(partnerMode: boolean): Promise<Order[]> {
   const raw = await AsyncStorage.getItem('userToken');
   if (!raw) throw new Error('Vui lòng đăng nhập lại.');
   const user = JSON.parse(raw) as { userID?: number };
   if (!user.userID) throw new Error('Không tìm thấy mã tài khoản tài xế.');
 
-  const driverResponse = await fetch(`${API}/drivers/getDriverIDBasedOnUserID?userID=${user.userID}`);
+  const driverResponse = await fetch(partnerMode
+    ? `${API}/drivers/getDriverPartnerIDBasedOnUserID?userID=${user.userID}`
+    : `${API}/drivers/getDriverIDBasedOnUserID?userID=${user.userID}`);
   const driverPayload = await driverResponse.json();
   if (!driverResponse.ok || !driverPayload.data) throw new Error('Không tìm thấy hồ sơ tài xế.');
   const assignmentResponse = await fetch(
-    `${API}/drivers/getDriverOrderBasedOnDriverID?driverID=${driverPayload.data}`,
+    partnerMode
+      ? `${API}/drivers/getDriverPartnerOrdersByID?driverPartnerID=${driverPayload.data}`
+      : `${API}/drivers/getDriverOrderBasedOnDriverID?driverID=${driverPayload.data}`,
   );
   const assignmentPayload = await assignmentResponse.json();
   if (!assignmentResponse.ok || !Array.isArray(assignmentPayload.data)) {

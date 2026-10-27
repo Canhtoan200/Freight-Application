@@ -80,7 +80,7 @@ export default function GuestHome() {
       <Text style={styles.cell}>{order.goods_quantity || 'null'}</Text>
       <Text style={styles.cell}>{order.receiver_name || 'null'}</Text>
       <Text style={styles.cell}>{order.sender_name || 'null'}</Text>
-      {order.shipping_status !== 'Đã lên toa' &&
+      {!['Đã lên toa', 'Đã dỡ toa'].includes(order.shipping_status || '') &&
       (order.shipping_status === 'Tài xế đang đi!' || order.driver_name) ? (
         <TouchableOpacity
           style={styles.cell}
