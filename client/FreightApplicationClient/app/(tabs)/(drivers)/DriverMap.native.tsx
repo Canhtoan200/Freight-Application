@@ -42,6 +42,10 @@ const GOONG_STYLE_URL = `https://tiles.goong.io/assets/goong_map_web.json?api_ke
 const INITIAL_COORDINATE: Coordinate = [106.7009, 10.7769];
 const DRIVER_START_ADDRESS = 'KDC Nam Thịnh, An Bình, Dĩ An, Bình Dương';
 const STATUS_HEADING_TO_PICKUP = 'Tài xế đang đi!';
+const STATUS_DELIVERING = 'Đang giao hàng';
+const STATUS_DELIVERED = 'Đã giao hàng';
+const isHeadingToDestination = (status: string | undefined, partnerMode: boolean) =>
+  status === (partnerMode ? STATUS_DELIVERING : STATUS_HEADING_TO_PICKUP);
 const STATUS_PICKED_UP = 'Đã nhận hàng';
 const STATUS_ARRIVED_AT_STATION = 'Đã tới ga';
 const STATUS_LOADED_ON_WAGON = 'Đã lên toa';
@@ -66,6 +70,7 @@ export default function DriverMap({ partnerMode = false }: DriverMapProps) {
   const [simulationStarted, setSimulationStarted] = useState(false);
   const [simulating, setSimulating] = useState(false);
   const [updatingOrderID, setUpdatingOrderID] = useState<number | null>(null);
+  const [driverStartAddress, setDriverStartAddress] = useState(DRIVER_START_ADDRESS);
   const [errorMessage, setErrorMessage] = useState(
     IS_EXPO_GO
       ? 'MapLibre cần Development Build và không chạy trong Expo Go.'
@@ -94,12 +99,11 @@ export default function DriverMap({ partnerMode = false }: DriverMapProps) {
 
     const loadMapData = async () => {
       try {
-        const [fetchedOrders, coordinate] = await Promise.all([
-          loadDriverOrders(partnerMode),
-          geocodeAddress(DRIVER_START_ADDRESS),
-        ]);
+        const context = await loadDriverContext(partnerMode);
+        const coordinate = await geocodeAddress(context.startAddress);
         if (!mounted) return;
-        setOrders(fetchedOrders.filter((order) => order.shipping_status !== STATUS_LOADED_ON_WAGON));
+        setDriverStartAddress(context.startAddress);
+        setOrders(context.orders.filter((order) => order.shipping_status !== STATUS_LOADED_ON_WAGON));
         setDriverCoordinate(coordinate);
         cameraRef.current?.easeTo({
           center: coordinate,
@@ -173,13 +177,13 @@ export default function DriverMap({ partnerMode = false }: DriverMapProps) {
       return;
     }
 
-    const destinationAddress = getDestinationAddress(order);
+    const destinationAddress = getDestinationAddress(order, partnerMode);
     if (!destinationAddress) {
       setErrorMessage(`Đơn hàng #${order.OrderID} chưa có địa chỉ đến.`);
       return;
     }
 
-    const originAddress = DRIVER_START_ADDRESS;
+    const originAddress = driverStartAddress;
     if (!originAddress) {
       setErrorMessage(`Đơn hàng #${order.OrderID} chưa có địa chỉ người gửi.`);
       return;
@@ -223,7 +227,7 @@ export default function DriverMap({ partnerMode = false }: DriverMapProps) {
   };
 
   const selectedOrder = orders.find((order) => order.OrderID === selectedOrderID) ?? null;
-  const selectedDestination = selectedOrder ? getDestinationAddress(selectedOrder) : null;
+  const selectedDestination = selectedOrder ? getDestinationAddress(selectedOrder, partnerMode) : null;
 
   const startSimulation = () => {
     if (!route || simulationStarted || simulating) return;
@@ -246,8 +250,8 @@ export default function DriverMap({ partnerMode = false }: DriverMapProps) {
 
   const advanceOrder = async () => {
     if (!selectedOrder || updatingOrderID !== null || !simulationStarted || simulating || simulationProgress < 1) return;
-    const nextStatus = selectedOrder.shipping_status === STATUS_HEADING_TO_PICKUP
-      ? STATUS_PICKED_UP
+    const nextStatus = isHeadingToDestination(selectedOrder.shipping_status, partnerMode)
+      ? (partnerMode ? STATUS_DELIVERED : STATUS_PICKED_UP)
       : null;
     if (!nextStatus) return;
 
@@ -281,7 +285,7 @@ export default function DriverMap({ partnerMode = false }: DriverMapProps) {
   };
 
   const renderOrderRow = (order: Order, index: number) => {
-    if (![STATUS_HEADING_TO_PICKUP, STATUS_PICKED_UP, STATUS_ARRIVED_AT_STATION].includes(order.shipping_status ?? '')) {
+    if (![STATUS_HEADING_TO_PICKUP, STATUS_DELIVERING, STATUS_PICKED_UP, STATUS_ARRIVED_AT_STATION].includes(order.shipping_status ?? '')) {
       return null;
     }
 
@@ -376,7 +380,7 @@ export default function DriverMap({ partnerMode = false }: DriverMapProps) {
             Điểm nhận hàng: {selectedDestination}
           </Text>
         )}
-        {selectedOrder?.shipping_status === STATUS_HEADING_TO_PICKUP && (
+        {isHeadingToDestination(selectedOrder?.shipping_status, partnerMode) && (
           <Text style={styles.coordinateText}>
             {route
               ? simulating
@@ -388,7 +392,7 @@ export default function DriverMap({ partnerMode = false }: DriverMapProps) {
             {' · '}{route?.distanceText || '—'} · ETA {route?.durationText || '—'}
           </Text>
         )}
-        {selectedOrder?.shipping_status === STATUS_HEADING_TO_PICKUP && (
+        {isHeadingToDestination(selectedOrder?.shipping_status, partnerMode) && (
           <TouchableOpacity
             style={[styles.advanceButton, (!route || simulating) && styles.disabledButton]}
             onPress={() => {
@@ -396,13 +400,13 @@ export default function DriverMap({ partnerMode = false }: DriverMapProps) {
               else void advanceOrder();
             }}
             disabled={
-              updatingOrderID === selectedOrder.OrderID ||
+              updatingOrderID === selectedOrder?.OrderID ||
               !route ||
               simulating ||
               (simulationStarted && simulationProgress < 1)
             }
           >
-            {updatingOrderID === selectedOrder.OrderID
+            {updatingOrderID === selectedOrder?.OrderID
               ? <ActivityIndicator color="#fff" />
               : simulating
                 ? <Text style={styles.advanceButtonText}>Đang mô phỏng...</Text>
@@ -435,14 +439,30 @@ export default function DriverMap({ partnerMode = false }: DriverMapProps) {
   );
 }
 
-async function loadDriverOrders(partnerMode: boolean): Promise<Order[]> {
+async function loadDriverContext(partnerMode: boolean): Promise<{ orders: Order[]; startAddress: string }> {
   const raw = await AsyncStorage.getItem('userToken');
-  const user = raw ? JSON.parse(raw) as { userID?: number } : null;
-  if (!user?.userID) throw new Error('Vui lòng đăng nhập lại để tải đơn được phân công.');
+  const user = raw ? JSON.parse(raw) as { userID?: number | string; ID?: number | string } : null;
+  const userID = Number(user?.userID ?? user?.ID);
+  if (!Number.isInteger(userID) || userID <= 0) throw new Error('Vui lòng đăng nhập lại để tải đơn được phân công.');
 
-  const driverID = await fetchDriverID(user.userID, partnerMode);
-  const orderIDs = await fetchDriverOrderIDs(driverID, partnerMode);
-  return Promise.all(orderIDs.map(fetchOrderByID));
+  const driverID = await fetchDriverID(userID, partnerMode);
+  const [orderIDs, profile] = await Promise.all([
+    fetchDriverOrderIDs(driverID, partnerMode),
+    fetchDriverProfile(driverID, partnerMode),
+  ]);
+  const orders = await Promise.all(orderIDs.map(fetchOrderByID));
+  return {
+    orders,
+    startAddress: partnerMode ? profile?.driver_link || 'Ga Giáp Bát, Hà Nội' : DRIVER_START_ADDRESS,
+  };
+}
+
+async function fetchDriverProfile(driverID: number, partnerMode: boolean): Promise<{ driver_link?: string } | null> {
+  if (!partnerMode) return null;
+  const response = await fetch(`${SERVER_URL}/drivers/getDriverPartnerByID?driverPartnerID=${driverID}`);
+  const payload = await response.json();
+  if (!response.ok || !payload.data) return null;
+  return payload.data;
 }
 
 async function fetchDriverID(userID: number, partnerMode: boolean): Promise<number> {
@@ -476,13 +496,13 @@ async function fetchOrderByID(orderID: number): Promise<Order> {
   return payload.data as Order;
 }
 
-function getDestinationAddress(order: Order): string | null {
+function getDestinationAddress(order: Order, partnerMode = false): string | null {
   if (
     order.shipping_status === STATUS_PICKED_UP
     || order.shipping_status === STATUS_ARRIVED_AT_STATION
     || order.shipping_status === STATUS_LOADED_ON_WAGON
   ) return null;
-  return order.sender_address ?? null;
+  return (partnerMode ? order.receiver_address : order.sender_address) ?? null;
 }
 
 async function fetchDrivingRoute(from: Coordinate, to: Coordinate): Promise<RouteResult> {

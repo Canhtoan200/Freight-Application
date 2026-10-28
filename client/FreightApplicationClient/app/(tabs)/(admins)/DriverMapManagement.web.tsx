@@ -59,6 +59,7 @@ type OrdersPanelProps = {
   orders: Order[];
   drivers: Driver[];
   readOnly: boolean;
+  partnerMode: boolean;
   selectedOrderID: number | null;
   top: number;
   onSelect: (order: Order) => void;
@@ -100,7 +101,7 @@ const ORDERS_BY_STATUS_URL =
 const DRIVERS_URL = 'https://freight-application-server.onrender.com/api/v1/drivers/getAllDrivers';
 const ASSIGN_DRIVER_URL =
   'https://freight-application-server.onrender.com/api/v1/drivers/createDriverOrderDetail';
-const ORDERS_STATUS = 'Đã tiếp nhận';
+const ORDERS_STATUS = 'Đang dỡ hàng';
 const ACTIVE_FLEET_STATUSES = new Set([
   ORDERS_STATUS,
   'Tài xế đang đi!',
@@ -438,8 +439,7 @@ export default function DriverMapManagement({
         mapRef.current = map;
 
         map.on('error', (event: any) => {
-          console.error('MapLibre error:', event);
-          if (mounted) setErrorMessage('Lỗi khi tải dữ liệu bản đồ.');
+          console.error('MapLibre error:', event?.error ?? event);
         });
 
         map.addControl(new maplibregl.NavigationControl({ showCompass: true, showZoom: true }), 'top-right');
@@ -609,14 +609,15 @@ export default function DriverMapManagement({
     setTrackingSession(null);
     setErrorMessage('');
 
-    if (!order.sender_address?.trim()) {
-      setErrorMessage(`Đơn hàng #${order.OrderID} chưa có địa chỉ người gửi.`);
+    const destinationAddress = (partnerMode ? order.receiver_address : order.sender_address)?.trim();
+    if (!destinationAddress) {
+      setErrorMessage(`Đơn hàng #${order.OrderID} chưa có ${partnerMode ? 'địa chỉ người nhận' : 'địa chỉ người gửi'}.`);
       return;
     }
 
     setGeocoding(true);
     try {
-      const coordinate = await geocodeAddress(order.sender_address);
+      const coordinate = await geocodeAddress(destinationAddress);
       if (requestID !== orderRequestRef.current) return;
 
       setOrderCoordinate(coordinate);
@@ -642,19 +643,23 @@ export default function DriverMapManagement({
     setTrackingSession(null);
     setErrorMessage('');
 
-    if (!selectedOrder?.sender_address?.trim()) {
-      setErrorMessage('Đơn hàng chưa có địa chỉ người gửi để tạo tuyến đường.');
+    const destinationAddress = (partnerMode ? selectedOrder?.receiver_address : selectedOrder?.sender_address)?.trim();
+    if (!destinationAddress) {
+      setErrorMessage(`Đơn hàng chưa có ${partnerMode ? 'địa chỉ người nhận' : 'địa chỉ người gửi'} để tạo tuyến đường.`);
       return;
     }
 
     try {
       setGeocoding(true);
       setRouting(false);
+      const driverAddress = partnerMode
+        ? (driver.driver_link?.trim() || 'Ga Giáp Bát, Hà Nội')
+        : DRIVER_START_ADDRESS;
       const [driverLocation, destination] = await Promise.all([
-        geocodeAddress(DRIVER_START_ADDRESS),
+        geocodeAddress(driverAddress),
         orderCoordinate
           ? Promise.resolve(orderCoordinate)
-          : geocodeAddress(selectedOrder.sender_address),
+          : geocodeAddress(destinationAddress),
       ]);
       if (requestID !== driverRequestRef.current) return;
       setDriverCoordinate(driverLocation);
@@ -883,6 +888,7 @@ export default function DriverMapManagement({
             orders={orders}
             drivers={drivers}
             readOnly={readOnly}
+            partnerMode={partnerMode}
             selectedOrderID={selectedOrder?.OrderID ?? null}
             top={Math.max(insets.top + 8, 16)}
             onSelect={handleSelectOrder}
@@ -936,6 +942,7 @@ function OrdersPanel({
   orders,
   drivers,
   readOnly,
+  partnerMode,
   selectedOrderID,
   top,
   onSelect,
@@ -966,10 +973,10 @@ function OrdersPanel({
                 disabled={readOnly}
               >
                 <Text style={[styles.orderTitle, selected && styles.selectedRowText]}>
-                  #{order.OrderID} · {order.organization || order.sender_name || 'Khách hàng'}
+                  #{order.OrderID} · {order.order_name || 'Đơn hàng'} - {partnerMode ? (order.receiver_name || 'Người nhận') : (order.sender_name || order.organization || 'Người gửi')}
                 </Text>
                 <Text style={styles.orderAddress} numberOfLines={1}>
-                  {order.sender_address || 'Chưa có địa chỉ'}
+                  {partnerMode ? (order.receiver_address || 'Chưa có địa chỉ người nhận') : (order.sender_address || 'Chưa có địa chỉ người gửi')}
                 </Text>
                 {readOnly && (
                   <Text style={styles.orderAddress}>

@@ -13,6 +13,8 @@ type Order = {
   sender_name?: string;
   receiver_name?: string;
   driver_name?: string;
+  delivery_driver_name?: string;
+  delivery_driver_link?: string;
   shipping_status?: string;
 };
 
@@ -67,6 +69,8 @@ export default function GuestTrackingMap() {
               && latest.shipping_status === current.shipping_status
               && latest.sender_address === current.sender_address
               && latest.driver_name === current.driver_name
+              && latest.delivery_driver_name === current.delivery_driver_name
+              && latest.delivery_driver_link === current.delivery_driver_link
             ) return current;
             return latest;
           });
@@ -97,10 +101,15 @@ export default function GuestTrackingMap() {
       return () => { active = false; };
     }
 
-    const destinationAddress =
-      selectedOrder.shipping_status === 'Đã nhận hàng' ? STATION : selectedOrder.sender_address;
-    const originAddress =
-      selectedOrder.shipping_status === 'Đã nhận hàng'
+    const delivering = selectedOrder.shipping_status === 'Đang giao hàng';
+    const destinationAddress = delivering
+      ? selectedOrder.receiver_address
+      : selectedOrder.shipping_status === 'Đã nhận hàng'
+        ? STATION
+        : selectedOrder.sender_address;
+    const originAddress = delivering
+      ? (selectedOrder.delivery_driver_link || 'Ga Giáp Bát, Hà Nội')
+      : selectedOrder.shipping_status === 'Đã nhận hàng'
         ? selectedOrder.sender_address
         : DRIVER_START;
     if (!destinationAddress || !originAddress) {
@@ -236,7 +245,7 @@ export default function GuestTrackingMap() {
                 <Text style={styles.orderTitle}>#{order.OrderID} · {order.order_name || order.sender_name}</Text>
                 <Text style={styles.muted}>{order.shipping_status || 'Chưa có trạng thái'}</Text>
                 {!['Đã lên toa', 'Đã dỡ toa'].includes(order.shipping_status ?? '') && (
-                  <Text style={styles.muted}>{order.driver_name || 'Chưa phân công tài xế'}</Text>
+                  <Text style={styles.muted}>{order.shipping_status === 'Đang giao hàng' ? (order.delivery_driver_name || 'Chưa phân công tài xế giao hàng') : (order.driver_name || 'Chưa phân công tài xế')}</Text>
                 )}
               </TouchableOpacity>
             ))}

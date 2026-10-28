@@ -153,7 +153,8 @@ export default function AdminHome() {
       setWagons((current) => current.map((item) =>
         item.WagonID === wagon.WagonID ? { ...item, wagon_type: "UNLOADING" } : item
       ));
-      Alert.alert("Thành công", `Toa ${wagon.wagon_number || ""} đã được chuyển sang danh sách toa dỡ.`);
+      await Promise.all([fetchWagons(), fetchOrders()]);
+      Alert.alert("Thành công", `Toa ${wagon.wagon_number || ""} đã được chuyển sang danh sách toa dỡ và các đơn đã chuyển sang trạng thái đang dỡ hàng.`);
     } catch (error) {
       console.error("Không thể chuyển toa xếp sang toa dỡ:", error);
       Alert.alert("Lỗi", error instanceof Error ? error.message : "Không thể chuyển toa sang toa dỡ.");

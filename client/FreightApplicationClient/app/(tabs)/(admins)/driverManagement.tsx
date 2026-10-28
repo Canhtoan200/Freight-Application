@@ -2,10 +2,14 @@ import React from "react";
 import { StyleSheet, View } from "react-native";
 import DriverMap from "./DriverMapManagement";
 
-export default function DriverManagement() {
+type DriverManagementProps = {
+  partnerMode?: boolean;
+};
+
+export default function DriverManagement({ partnerMode = false }: DriverManagementProps) {
   return (
     <View style={styles.container}>
-      <DriverMap />
+      <DriverMap partnerMode={partnerMode} />
     </View>
   );
 }

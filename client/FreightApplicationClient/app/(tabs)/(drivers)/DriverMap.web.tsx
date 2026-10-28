@@ -9,6 +9,8 @@ type Order = {
   order_name?: string;
   sender_address?: string;
   sender_name?: string;
+  receiver_address?: string;
+  receiver_name?: string;
   shipping_status?: string;
   organization?: string;
 };
@@ -20,6 +22,9 @@ const GOONG_KEY = process.env.EXPO_PUBLIC_GOONG_API_KEY ?? MAPTILES_KEY;
 const STYLE_URL = `https://tiles.goong.io/assets/goong_map_web.json?api_key=${encodeURIComponent(MAPTILES_KEY)}`;
 const DRIVER_START = 'KDC Nam Thịnh, An Bình, Dĩ An, Bình Dương';
 const HEADING_TO_PICKUP = 'Tài xế đang đi!';
+const DELIVERING = 'Đang giao hàng';
+const isHeadingToDestination = (status: string | undefined, partnerMode: boolean) =>
+  status === (partnerMode ? DELIVERING : HEADING_TO_PICKUP);
 const PICKED_UP = 'Đã nhận hàng';
 const ARRIVED_AT_STATION = 'Đã tới ga';
 const LOADED_ON_WAGON = 'Đã lên toa';
@@ -49,6 +54,8 @@ export default function DriverMap({ partnerMode = false }: DriverMapProps) {
   const [routeLoading, setRouteLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [driverStartAddress, setDriverStartAddress] = useState(DRIVER_START);
+  const [driverProfile, setDriverProfile] = useState<{ driver_name?: string; driver_link?: string; driver_phone_number?: string } | null>(null);
 
   const stopSimulation = () => {
     if (simulationTimerRef.current !== null) {
@@ -68,10 +75,12 @@ export default function DriverMap({ partnerMode = false }: DriverMapProps) {
   useEffect(() => {
     let active = true;
     void loadAssignedOrders(partnerMode)
-      .then((items) => {
+      .then(({ orders: items, driver }) => {
         if (!active) return;
         setOrders(items.filter((order) => order.shipping_status !== LOADED_ON_WAGON));
         setSelected(items.find((order) => order.shipping_status !== LOADED_ON_WAGON) ?? null);
+        setDriverProfile(driver);
+        setDriverStartAddress(partnerMode ? (driver?.driver_link || 'Ga Giáp Bát, Hà Nội') : DRIVER_START);
       })
       .catch((loadError) => {
         console.error('Không thể tải đơn được phân công:', loadError);
@@ -96,8 +105,8 @@ export default function DriverMap({ partnerMode = false }: DriverMapProps) {
       setRouteLoading(false);
       return () => { active = false; };
     }
-    const destination = getDriverDestination(selected);
-    const origin = DRIVER_START;
+    const destination = getDriverDestination(selected, partnerMode);
+    const origin = driverStartAddress;
     if (!origin || !destination) {
       setError('Đơn hàng thiếu địa chỉ để tính tuyến đường.');
       return () => { active = false; };
@@ -116,7 +125,7 @@ export default function DriverMap({ partnerMode = false }: DriverMapProps) {
       })
       .finally(() => { if (active) setRouteLoading(false); });
     return () => { active = false; };
-  }, [selected]);
+  }, [selected, partnerMode, driverStartAddress]);
 
   useEffect(() => {
     let active = true;
@@ -235,7 +244,7 @@ export default function DriverMap({ partnerMode = false }: DriverMapProps) {
 
   const updateOrder = async () => {
     if (!selected || saving || !simulationStarted || simulating || simulationProgress < 1) return;
-    const next = selected.shipping_status === HEADING_TO_PICKUP ? PICKED_UP : null;
+    const next = isHeadingToDestination(selected.shipping_status, partnerMode) ? (partnerMode ? 'Đã giao hàng' : PICKED_UP) : null;
     if (!next) return;
     setSaving(true);
     setError('');
@@ -283,6 +292,9 @@ export default function DriverMap({ partnerMode = false }: DriverMapProps) {
       <View ref={mapContainer} style={styles.map} />
       <View style={[styles.panel, { top: Math.max(insets.top + 10, 16) }]}>
         <Text style={styles.title}>Đơn hàng được phân công</Text>
+        {driverProfile && partnerMode && (
+          <Text style={styles.muted}>Tài xế: {driverProfile.driver_name || 'Đối tác'}{driverProfile.driver_phone_number ? ` · ${driverProfile.driver_phone_number}` : ''}</Text>
+        )}
         {loading ? <ActivityIndicator color="#2563eb" /> : orders.length === 0 ? (
           <Text style={styles.muted}>Chưa có đơn được phân công.</Text>
         ) : (
@@ -306,9 +318,9 @@ export default function DriverMap({ partnerMode = false }: DriverMapProps) {
                 ? 'Đã nhận hàng · có thể tiếp tục nhận đơn khác trước khi tới ga.'
                 : selected.shipping_status === ARRIVED_AT_STATION
                   ? 'Đã tới ga · chờ admin xếp toa tàu.'
-                  : `Điểm nhận hàng: ${getDriverDestination(selected)}`}
+                  : `Điểm nhận hàng: ${getDriverDestination(selected, partnerMode)}`}
             </Text>
-            {selected.shipping_status === HEADING_TO_PICKUP && (
+            {isHeadingToDestination(selected.shipping_status, partnerMode) && (
               <Text style={styles.eta}>
               {routeLoading
                 ? 'Đang tạo tuyến đường...'
@@ -322,7 +334,7 @@ export default function DriverMap({ partnerMode = false }: DriverMapProps) {
                 {' · ETA '}{route?.durationText || '—'} · {route?.distanceText || ''}
               </Text>
             )}
-            {selected.shipping_status === HEADING_TO_PICKUP && (
+            {isHeadingToDestination(selected.shipping_status, partnerMode) && (
               <TouchableOpacity
                 style={[styles.action, (saving || routeLoading || simulating || !route) && styles.disabledAction]}
                 onPress={() => {
@@ -354,17 +366,24 @@ export default function DriverMap({ partnerMode = false }: DriverMapProps) {
   );
 }
 
-async function loadAssignedOrders(partnerMode: boolean): Promise<Order[]> {
+async function loadAssignedOrders(partnerMode: boolean): Promise<{ orders: Order[]; driver: { driver_name?: string; driver_link?: string; driver_phone_number?: string } | null }> {
   const raw = await AsyncStorage.getItem('userToken');
   if (!raw) throw new Error('Vui lòng đăng nhập lại.');
-  const user = JSON.parse(raw) as { userID?: number };
-  if (!user.userID) throw new Error('Không tìm thấy mã tài khoản tài xế.');
+  const user = JSON.parse(raw) as { userID?: number | string; ID?: number | string };
+  const userID = Number(user.userID ?? user.ID);
+  if (!Number.isInteger(userID) || userID <= 0) throw new Error('Không tìm thấy mã tài khoản tài xế.');
 
   const driverResponse = await fetch(partnerMode
-    ? `${API}/drivers/getDriverPartnerIDBasedOnUserID?userID=${user.userID}`
-    : `${API}/drivers/getDriverIDBasedOnUserID?userID=${user.userID}`);
+    ? `${API}/drivers/getDriverPartnerIDBasedOnUserID?userID=${userID}`
+    : `${API}/drivers/getDriverIDBasedOnUserID?userID=${userID}`);
   const driverPayload = await driverResponse.json();
   if (!driverResponse.ok || !driverPayload.data) throw new Error('Không tìm thấy hồ sơ tài xế.');
+  let driver: { driver_name?: string; driver_link?: string; driver_phone_number?: string } | null = null;
+  if (partnerMode) {
+    const profileResponse = await fetch(`${API}/drivers/getDriverPartnerByID?driverPartnerID=${driverPayload.data}`);
+    const profilePayload = await profileResponse.json();
+    if (profileResponse.ok && profilePayload.data) driver = profilePayload.data;
+  }
   const assignmentResponse = await fetch(
     partnerMode
       ? `${API}/drivers/getDriverPartnerOrdersByID?driverPartnerID=${driverPayload.data}`
@@ -382,11 +401,11 @@ async function loadAssignedOrders(partnerMode: boolean): Promise<Order[]> {
       return payload.data as Order | undefined;
     }),
   );
-  return details.filter((order): order is Order => Boolean(order));
+  return { orders: details.filter((order): order is Order => Boolean(order)), driver };
 }
 
-function getDriverDestination(order: Order): string | undefined {
-  return order.sender_address;
+function getDriverDestination(order: Order, partnerMode = false): string | undefined {
+  return partnerMode ? order.receiver_address : order.sender_address;
 }
 
 async function geocode(address: string): Promise<Coordinate> {

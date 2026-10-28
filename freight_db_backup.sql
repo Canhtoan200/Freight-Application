@@ -26,7 +26,7 @@ SET @@GLOBAL.GTID_PURGED=/*!80000 '+'*/ '14fe7ccd-33d8-11f1-8b70-6a747bcbd312:1-
 3df9c762-2f10-11f1-aa65-8ee428239ae2:1-35,
 6e750b8e-7299-11f1-b67c-460e85b6c779:1-15,
 8d75273d-972e-11f1-bdb7-0662c0da8c08:1-18,
-94a8306e-d1be-11f1-913c-c215fef23956:1-16,
+94a8306e-d1be-11f1-913c-c215fef23956:1-20,
 9ab80630-c623-11f1-ae2a-d22c45bd1203:1-15,
 c8533ceb-c183-11f1-80aa-2ef00bd8d833:1-21,
 d0ed3a68-ce8f-11f1-bf48-9e250768c629:1-43,
@@ -92,6 +92,34 @@ CREATE TABLE `driver_partners` (
 LOCK TABLES `driver_partners` WRITE;
 /*!40000 ALTER TABLE `driver_partners` DISABLE KEYS */;
 /*!40000 ALTER TABLE `driver_partners` ENABLE KEYS */;
+UNLOCK TABLES;
+
+--
+-- Table structure for table `driver_partners_order_details`
+--
+
+DROP TABLE IF EXISTS `driver_partners_order_details`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `driver_partners_order_details` (
+  `DriverOrderID` int NOT NULL AUTO_INCREMENT,
+  `DriverPartnerIDs` int DEFAULT NULL,
+  `OrderIDs` int DEFAULT NULL,
+  PRIMARY KEY (`DriverOrderID`),
+  KEY `idx_driver_partners_order_details_driver` (`DriverPartnerIDs`),
+  KEY `idx_driver_partners_order_details_order` (`OrderIDs`),
+  CONSTRAINT `fk_driver_partners_order_details_driver` FOREIGN KEY (`DriverPartnerIDs`) REFERENCES `driver_partners` (`DriverPartnerIDs`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_driver_partners_order_details_order` FOREIGN KEY (`OrderIDs`) REFERENCES `shipping_orders` (`OrderID`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `driver_partners_order_details`
+--
+
+LOCK TABLES `driver_partners_order_details` WRITE;
+/*!40000 ALTER TABLE `driver_partners_order_details` DISABLE KEYS */;
+/*!40000 ALTER TABLE `driver_partners_order_details` ENABLE KEYS */;
 UNLOCK TABLES;
 
 --
@@ -221,6 +249,7 @@ CREATE TABLE `shipping_wagons` (
   `wagon_arrival_date` datetime DEFAULT NULL,
   `wagon_route` varchar(45) DEFAULT NULL,
   `create_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `wagon_type` enum('LOADING','UNLOADING') NOT NULL DEFAULT 'LOADING',
   PRIMARY KEY (`WagonID`)
 ) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
@@ -231,7 +260,7 @@ CREATE TABLE `shipping_wagons` (
 
 LOCK TABLES `shipping_wagons` WRITE;
 /*!40000 ALTER TABLE `shipping_wagons` DISABLE KEYS */;
-INSERT INTO `shipping_wagons` VALUES (1,'231542','2026-10-26 10:39:00','2026-10-30 10:39:00','Ga Sóng Thần - Ga Giáp Bát','2026-10-26 03:42:15');
+INSERT INTO `shipping_wagons` VALUES (1,'231542','2026-10-26 10:39:00','2026-10-30 10:39:00','Ga Sóng Thần - Ga Giáp Bát','2026-10-26 03:42:15','LOADING');
 /*!40000 ALTER TABLE `shipping_wagons` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -252,7 +281,7 @@ CREATE TABLE `user` (
   `update_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`ID`),
   UNIQUE KEY `email_UNIQUE` (`email`)
-) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=9 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -261,7 +290,7 @@ CREATE TABLE `user` (
 
 LOCK TABLES `user` WRITE;
 /*!40000 ALTER TABLE `user` DISABLE KEYS */;
-INSERT INTO `user` VALUES (1,'Admin',NULL,'canhtoan.work000@gmail.com','$2b$10$7FYn.Rptx6thmvkL.JnlaeF7Wh8dO13Qv5RGVsCsTgx/29rcaWKgC','2026-04-03 10:57:00','2026-04-03 10:57:00'),(2,'Accountant',NULL,'accountant@gmail.com','$2b$10$HGuMzeB5g.o6WPyL9Vrnxu/Xp5eXIL46giOw4BpWsBaP/nYUHMwBK','2026-04-11 03:35:13','2026-04-11 03:37:26'),(3,'Partner',NULL,'partner@gmail.com','$2b$10$MLOrPuyWwaE5dh/0S4x.6Op7Hh23gq4iqbkpyQoCR0/b7fw7jIKsm','2026-04-11 03:38:08','2026-04-11 03:38:08'),(4,'Driver',NULL,'driver@gmail.com','$2b$10$f1ZulyzY9qhrmS0PqI9k.u0guEfXgFSYOWEnoWAI/otqptrXB4T6e','2026-04-11 03:38:22','2026-04-11 03:38:22'),(5,'Guest','Cty Phước Tá','guest@gmail.com','$2b$10$osaxSsGptQZQRsufu9TaIOYUkroRk4ObzvorZQqoKpbwAzXG4juhy','2026-04-11 03:38:37','2026-04-15 10:17:39'),(6,'QAStaff',NULL,'qastaff@gmail.com','$2b$10$.EBPYFORubf5VPSCzk44zuh8SN2v7P.XUYVIH8t9Ii8GJOsSrjPGK','2026-04-11 03:39:02','2026-04-11 03:39:02');
+INSERT INTO `user` VALUES (1,'Admin',NULL,'canhtoan.work000@gmail.com','$2b$10$7FYn.Rptx6thmvkL.JnlaeF7Wh8dO13Qv5RGVsCsTgx/29rcaWKgC','2026-04-03 10:57:00','2026-04-03 10:57:00'),(2,'Accountant',NULL,'accountant@gmail.com','$2b$10$HGuMzeB5g.o6WPyL9Vrnxu/Xp5eXIL46giOw4BpWsBaP/nYUHMwBK','2026-04-11 03:35:13','2026-04-11 03:37:26'),(3,'Partner',NULL,'partner@gmail.com','$2b$10$MLOrPuyWwaE5dh/0S4x.6Op7Hh23gq4iqbkpyQoCR0/b7fw7jIKsm','2026-04-11 03:38:08','2026-04-11 03:38:08'),(4,'Driver',NULL,'driver@gmail.com','$2b$10$f1ZulyzY9qhrmS0PqI9k.u0guEfXgFSYOWEnoWAI/otqptrXB4T6e','2026-04-11 03:38:22','2026-04-11 03:38:22'),(5,'Guest','Cty Phước Tá','guest@gmail.com','$2b$10$osaxSsGptQZQRsufu9TaIOYUkroRk4ObzvorZQqoKpbwAzXG4juhy','2026-04-11 03:38:37','2026-04-15 10:17:39'),(6,'QAStaff',NULL,'qastaff@gmail.com','$2b$10$.EBPYFORubf5VPSCzk44zuh8SN2v7P.XUYVIH8t9Ii8GJOsSrjPGK','2026-04-11 03:39:02','2026-04-11 03:39:02'),(7,'Accountant Partner',NULL,'accountantPartner@gmail.com','$2b$10$hCM2DvVrzjzsehQZL3wptu6YuB6w6Rnj9yHwfC0SZ8AWA4aMdr.hW','2026-10-27 11:14:08','2026-10-27 11:14:08'),(8,'Driver Partner',NULL,'driverPartner@gmail.com','$2b$10$AQA7WpFp1e0mYd.I24HUBOOy.Tz69c4QfyrhAqubRqj2dLbqy76qG','2026-10-27 11:14:32','2026-10-27 11:14:32');
 /*!40000 ALTER TABLE `user` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -304,4 +333,4 @@ SET @@SESSION.SQL_LOG_BIN = @MYSQLDUMP_TEMP_LOG_BIN;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2026-10-27 14:16:54
+-- Dump completed on 2026-10-28 16:13:40

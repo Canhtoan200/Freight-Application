@@ -220,19 +220,27 @@ export default function OrderDetail() {
                 <Text style={styles.value}>{order.receiver_phone_number || "Không có"}</Text>
             </View>
             <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Thông tin tài xế nhận hàng</Text>
+                    <Text style={styles.label}>Tài xế:</Text>
+                    <Text style={styles.value}>{order.receiving_driver_name || order.driver_name || "Chưa có"}</Text>
+                    <Text style={styles.label}>Biển số:</Text>
+                    <Text style={styles.value}>{order.receiving_driver_license_plate || order.driver_license_plate || "Chưa có"}</Text>
+                    <Text style={styles.label}>Số điện thoại tài xế:</Text>
+                    <Text style={styles.value}>{order.receiving_driver_phone_number || order.driver_phone_number || "Chưa có"}</Text>
+            </View>
+            <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Thông tin tài xế giao hàng</Text>
+                    <Text style={styles.label}>Tài xế:</Text>
+                    <Text style={styles.value}>{order.delivery_driver_name || "Chưa có"}</Text>
+                    <Text style={styles.label}>Biển số:</Text>
+                    <Text style={styles.value}>{order.delivery_driver_license_plate || "Chưa có"}</Text>
+                    <Text style={styles.label}>Số điện thoại tài xế:</Text>
+                    <Text style={styles.value}>{order.delivery_driver_phone_number || "Chưa có"}</Text>
+            </View>
+            <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Thông tin giao hàng</Text>
                 <Text style={styles.label}>Hướng xử lý:</Text>
                 <Text style={styles.value}>{order.handling_instruction || "Không có"}</Text>
-                {!["Đã lên toa", "Đã dỡ toa"].includes(order.shipping_status) && (
-                    <>
-                        <Text style={styles.label}>Tài xế:</Text>
-                        <Text style={styles.value}>{order.driver_name || "Chưa có"}</Text>
-                        <Text style={styles.label}>Biển số:</Text>
-                        <Text style={styles.value}>{order.driver_license_plate || "Chưa có"}</Text>
-                        <Text style={styles.label}>Số điện thoại tài xế:</Text>
-                        <Text style={styles.value}>{order.driver_phone_number || "Chưa có"}</Text>
-                    </>
-                )}
                 <Text style={styles.label}>Số toa:</Text>
                 <Text style={styles.value}>{order.wagon_number || "Chưa có"}</Text>
                 <Text style={styles.label}>Ngày chạy:</Text>

@@ -86,6 +86,7 @@ type OrdersPanelProps = {
   orders: Order[];
   drivers: Driver[];
   readOnly: boolean;
+  partnerMode: boolean;
   selectedOrderID: number | null;
   top: number;
   onSelect: (order: Order) => void;
@@ -124,7 +125,7 @@ const GOONG_STYLE_URL = `https://tiles.goong.io/assets/goong_map_web.json?api_ke
 const DEFAULT_COORDINATE: Coordinate = [106.7009, 10.7769];
 const DRIVER_START_ADDRESS = 'KDC Nam Thịnh, An Bình, Dĩ An, Bình Dương';
 const ACTIVE_FLEET_STATUSES = new Set([
-  'Đã tiếp nhận',
+  'Đang dỡ hàng',
   'Tài xế đang đi!',
   'Đã nhận hàng',
   'Đã tới ga',
@@ -133,7 +134,7 @@ const IS_EXPO_GO =
   Constants.appOwnership === 'expo' ||
   Constants.executionEnvironment === 'storeClient';
 const API_ENDPOINTS = {
-  ordersByStatus: `${SERVER_URL}/orders/getAllOrderByStatus?shipping_status=${encodeURIComponent('Đã tiếp nhận')}`,
+  ordersByStatus: `${SERVER_URL}/orders/getAllOrderByStatus?shipping_status=${encodeURIComponent('Đang dỡ hàng')}`,
 };
 
 type DriverMapManagementProps = {
@@ -348,7 +349,12 @@ export default function DriverMapManagement({
 
     setGeocoding(true);
     try {
-      const coordinate = await resolveAddress(order.sender_address);
+      const destinationAddress = (partnerMode ? order.receiver_address : order.sender_address)?.trim();
+      if (!destinationAddress) {
+        setErrorMessage(`Đơn hàng #${order.OrderID} chưa có ${partnerMode ? 'địa chỉ người nhận' : 'địa chỉ người gửi'}.`);
+        return;
+      }
+      const coordinate = await resolveAddress(destinationAddress);
       if (requestID !== orderRequestRef.current) return;
 
       if (!coordinate) {
@@ -377,7 +383,10 @@ export default function DriverMapManagement({
 
     setGeocoding(true);
     try {
-      const coordinate = await resolveAddress(DRIVER_START_ADDRESS);
+      const driverAddress = partnerMode
+        ? (driver.driver_link?.trim() || 'Ga Giáp Bát, Hà Nội')
+        : DRIVER_START_ADDRESS;
+      const coordinate = await resolveAddress(driverAddress);
       if (requestID !== driverRequestRef.current) return;
 
       if (!coordinate) {
@@ -569,6 +578,7 @@ export default function DriverMapManagement({
           orders={orders}
           drivers={drivers}
           readOnly={readOnly}
+          partnerMode={partnerMode}
           selectedOrderID={selectedOrder?.OrderID ?? null}
           top={Math.max(insets.top + 8, 16)}
           onSelect={(order) => void handleSelectOrder(order)}
@@ -628,6 +638,7 @@ function OrdersPanel({
   orders,
   drivers,
   readOnly,
+  partnerMode,
   selectedOrderID,
   top,
   onSelect,
@@ -658,10 +669,10 @@ function OrdersPanel({
                 disabled={readOnly}
               >
                 <Text style={[styles.orderTitle, selected && styles.selectedRowText]}>
-                  #{order.OrderID} · {order.organization || order.sender_name || 'Khách hàng'}
+                  #{order.OrderID} · {order.order_name || 'Đơn hàng'} - {partnerMode ? (order.receiver_name || 'Người nhận') : (order.sender_name || order.organization || 'Người gửi')}
                 </Text>
                 <Text style={styles.orderAddress} numberOfLines={1}>
-                  {order.sender_address || 'Chưa có địa chỉ'}
+                  {partnerMode ? (order.receiver_address || 'Chưa có địa chỉ người nhận') : (order.sender_address || 'Chưa có địa chỉ người gửi')}
                 </Text>
                 {readOnly && (
                   <Text style={styles.orderAddress}>

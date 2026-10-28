@@ -9,7 +9,7 @@ export default function Setting() {
   const handleLogout = async () => {
     try {
       await AsyncStorage.removeItem("userToken");
-      router.replace("/login");
+      router.replace("/");
     } catch (error) {
       console.error("Lỗi khi đăng xuất", error);
     }
