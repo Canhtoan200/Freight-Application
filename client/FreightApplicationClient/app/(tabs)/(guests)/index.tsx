@@ -45,7 +45,7 @@ export default function GuestHome() {
       }
       if (!data) throw new Error('Máy chủ trả về dữ liệu không hợp lệ.');
       if (!Array.isArray(data.data)) throw new Error('Danh sách đơn hàng không hợp lệ.');
-      setOrders(data.data);
+      setOrders(data.data.filter((order) => order.shipping_status !== 'Đã giao hàng'));
     } catch (error) {
       console.error(error);
       Alert.alert(

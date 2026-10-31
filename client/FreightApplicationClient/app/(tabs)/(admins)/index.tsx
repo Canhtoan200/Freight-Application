@@ -55,7 +55,10 @@ export default function AdminHome() {
       const response = await fetch('https://freight-application-server.onrender.com/api/v1/orders/getAllOrders');
       const data = await response.json();
       if (response.ok) {
-        setOrders(data.data || []);
+        const activeOrders = (data.data || []).filter(
+          (order: Order) => order.shipping_status !== "Đã giao hàng"
+        );
+        setOrders(activeOrders);
       } else {
         console.log("Lỗi", "Không thể tải danh sách đơn hàng");
       }
@@ -104,7 +107,9 @@ export default function AdminHome() {
       );
       const data = await response.json();
       if (response.ok) {
-        return data.data || [];
+        return (data.data || []).filter(
+          (order: Order) => order.shipping_status !== "Đã giao hàng"
+        );
       }
       return [];
     } catch {

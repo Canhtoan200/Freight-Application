@@ -26,7 +26,7 @@ SET @@GLOBAL.GTID_PURGED=/*!80000 '+'*/ '14fe7ccd-33d8-11f1-8b70-6a747bcbd312:1-
 3df9c762-2f10-11f1-aa65-8ee428239ae2:1-35,
 6e750b8e-7299-11f1-b67c-460e85b6c779:1-15,
 8d75273d-972e-11f1-bdb7-0662c0da8c08:1-18,
-94a8306e-d1be-11f1-913c-c215fef23956:1-20,
+94a8306e-d1be-11f1-913c-c215fef23956:1-30,
 9ab80630-c623-11f1-ae2a-d22c45bd1203:1-15,
 c8533ceb-c183-11f1-80aa-2ef00bd8d833:1-21,
 d0ed3a68-ce8f-11f1-bf48-9e250768c629:1-43,
@@ -57,7 +57,6 @@ CREATE TABLE `driver_order_details` (
 
 LOCK TABLES `driver_order_details` WRITE;
 /*!40000 ALTER TABLE `driver_order_details` DISABLE KEYS */;
-INSERT INTO `driver_order_details` VALUES (1,1,1);
 /*!40000 ALTER TABLE `driver_order_details` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -82,7 +81,7 @@ CREATE TABLE `driver_partners` (
   `drop_off_distance` float DEFAULT NULL,
   `create_at` datetime DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`DriverPartnerIDs`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -91,6 +90,7 @@ CREATE TABLE `driver_partners` (
 
 LOCK TABLES `driver_partners` WRITE;
 /*!40000 ALTER TABLE `driver_partners` DISABLE KEYS */;
+INSERT INTO `driver_partners` VALUES (1,'Vũ Văn Mạnh',8,'Ga Giáp Bát','50H 17187','0976275364',10.00,10.00,10,10,NULL,'2026-10-28 09:16:37');
 /*!40000 ALTER TABLE `driver_partners` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -110,7 +110,7 @@ CREATE TABLE `driver_partners_order_details` (
   KEY `idx_driver_partners_order_details_order` (`OrderIDs`),
   CONSTRAINT `fk_driver_partners_order_details_driver` FOREIGN KEY (`DriverPartnerIDs`) REFERENCES `driver_partners` (`DriverPartnerIDs`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `fk_driver_partners_order_details_order` FOREIGN KEY (`OrderIDs`) REFERENCES `shipping_orders` (`OrderID`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -119,7 +119,37 @@ CREATE TABLE `driver_partners_order_details` (
 
 LOCK TABLES `driver_partners_order_details` WRITE;
 /*!40000 ALTER TABLE `driver_partners_order_details` DISABLE KEYS */;
+INSERT INTO `driver_partners_order_details` VALUES (2,1,1);
 /*!40000 ALTER TABLE `driver_partners_order_details` ENABLE KEYS */;
+UNLOCK TABLES;
+
+--
+-- Table structure for table `driver_position`
+--
+
+DROP TABLE IF EXISTS `driver_position`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `driver_position` (
+  `positionID` int NOT NULL AUTO_INCREMENT,
+  `driverID` int NOT NULL,
+  `latitude` varchar(50) NOT NULL,
+  `longitude` varchar(50) NOT NULL,
+  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`positionID`),
+  KEY `fk_driver_position_driver` (`driverID`),
+  CONSTRAINT `fk_driver_position_driver` FOREIGN KEY (`driverID`) REFERENCES `drivers` (`DriverIDs`) ON DELETE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `driver_position`
+--
+
+LOCK TABLES `driver_position` WRITE;
+/*!40000 ALTER TABLE `driver_position` DISABLE KEYS */;
+INSERT INTO `driver_position` VALUES (1,1,'1','1','2026-10-30 06:56:18');
+/*!40000 ALTER TABLE `driver_position` ENABLE KEYS */;
 UNLOCK TABLES;
 
 --
@@ -221,8 +251,14 @@ CREATE TABLE `shipping_orders` (
   `wagon_arrival_date` datetime DEFAULT NULL,
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `organization` varchar(255) DEFAULT NULL,
+  `receiving_driver_name` varchar(100) DEFAULT NULL,
+  `receiving_driver_license_plate` varchar(20) DEFAULT NULL,
+  `receiving_driver_phone_number` varchar(45) DEFAULT NULL,
+  `delivery_driver_name` varchar(100) DEFAULT NULL,
+  `delivery_driver_license_plate` varchar(20) DEFAULT NULL,
+  `delivery_driver_phone_number` varchar(45) DEFAULT NULL,
   PRIMARY KEY (`OrderID`)
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -231,7 +267,7 @@ CREATE TABLE `shipping_orders` (
 
 LOCK TABLES `shipping_orders` WRITE;
 /*!40000 ALTER TABLE `shipping_orders` DISABLE KEYS */;
-INSERT INTO `shipping_orders` VALUES (1,'Sợi','2026-10-26 03:20:39','Hồng Phát','Vinatex','Ga Sóng Thần, An Bình, Dĩ An, Bình Dương','KCN Dệt may Phố Nối B, Xã Nguyễn Văn Linh, Hưng Yên','0908473406','0908473406',10,100.00,0.00,'','ngang',NULL,'Đã lên toa',NULL,NULL,NULL,'Trần Văn Sơn','50H 19249','0981391557','231542','2026-10-26 10:39:00','2026-10-30 10:39:00','2026-10-26 03:07:10','Cty Phước Tá');
+INSERT INTO `shipping_orders` VALUES (1,'Sợi','2026-10-28 10:27:29','Hồng Phát','Vinatex','Ga Sóng Thần, An Bình, Dĩ An, Bình Dương','KCN Dệt may Phố Nối B, Xã Nguyễn Văn Linh, Hưng Yên','0908473406','0908473406',10,100.00,0.00,'','ngang',NULL,'Đang giao hàng',NULL,NULL,NULL,'Trần Văn Sơn','50H 19249','0981391557','231542','2026-10-26 10:39:00','2026-10-30 10:39:00','2026-10-26 03:07:10','Cty Phước Tá','Trần Văn Sơn','50H 19249','0981391557','Vũ Văn Mạnh','50H 17187','0976275364'),(2,'Máy móc',NULL,'Cty Phuoc Ta','Cty Giang Toan','Ga Sóng Thần','Ga Sóng Thần','0908473406','0908473406',10,100.00,0.00,'','ngang',NULL,'Đã tiếp nhận',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,'2026-10-30 04:22:18','Cty Phước Tá',NULL,NULL,NULL,NULL,NULL,NULL);
 /*!40000 ALTER TABLE `shipping_orders` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -260,7 +296,7 @@ CREATE TABLE `shipping_wagons` (
 
 LOCK TABLES `shipping_wagons` WRITE;
 /*!40000 ALTER TABLE `shipping_wagons` DISABLE KEYS */;
-INSERT INTO `shipping_wagons` VALUES (1,'231542','2026-10-26 10:39:00','2026-10-30 10:39:00','Ga Sóng Thần - Ga Giáp Bát','2026-10-26 03:42:15','LOADING');
+INSERT INTO `shipping_wagons` VALUES (1,'231542','2026-10-26 10:39:00','2026-10-30 10:39:00','Ga Sóng Thần - Ga Giáp Bát','2026-10-26 03:42:15','UNLOADING');
 /*!40000 ALTER TABLE `shipping_wagons` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -333,4 +369,4 @@ SET @@SESSION.SQL_LOG_BIN = @MYSQLDUMP_TEMP_LOG_BIN;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2026-10-28 16:13:40
+-- Dump completed on 2026-10-30 14:04:36

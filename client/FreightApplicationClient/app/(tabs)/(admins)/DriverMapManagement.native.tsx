@@ -125,6 +125,7 @@ const GOONG_STYLE_URL = `https://tiles.goong.io/assets/goong_map_web.json?api_ke
 const DEFAULT_COORDINATE: Coordinate = [106.7009, 10.7769];
 const DRIVER_START_ADDRESS = 'KDC Nam Thịnh, An Bình, Dĩ An, Bình Dương';
 const ACTIVE_FLEET_STATUSES = new Set([
+  'Đã tiếp nhận',
   'Đang dỡ hàng',
   'Tài xế đang đi!',
   'Đã nhận hàng',
@@ -134,7 +135,9 @@ const IS_EXPO_GO =
   Constants.appOwnership === 'expo' ||
   Constants.executionEnvironment === 'storeClient';
 const API_ENDPOINTS = {
-  ordersByStatus: `${SERVER_URL}/orders/getAllOrderByStatus?shipping_status=${encodeURIComponent('Đang dỡ hàng')}`,
+  ordersByStatuses: ['Đã tiếp nhận', 'Đang dỡ hàng'].map(
+    (status) => `${SERVER_URL}/orders/getAllOrderByStatus?shipping_status=${encodeURIComponent(status)}`
+  ),
 };
 
 type DriverMapManagementProps = {
@@ -905,10 +908,19 @@ function TrackingMetric({ label, value }: { label: string; value: string }) {
 }
 
 async function fetchOrders(): Promise<Order[]> {
-  const response = await fetch(API_ENDPOINTS.ordersByStatus);
-  const payload = await parseResponse(response);
-  if (!response.ok) throw new Error(payload?.message || 'Không thể tải đơn hàng');
-  return Array.isArray(payload?.data) ? payload.data : Array.isArray(payload) ? payload : [];
+  const results = await Promise.all(API_ENDPOINTS.ordersByStatuses.map(async (url) => {
+    const response = await fetch(url);
+    const payload = await parseResponse(response);
+    if (!response.ok) throw new Error(payload?.message || 'Không thể tải đơn hàng');
+    return Array.isArray(payload?.data) ? payload.data : Array.isArray(payload) ? payload : [];
+  }));
+
+  const seenOrderIds = new Set<number>();
+  return results.flat().filter((order: Order) => {
+    if (seenOrderIds.has(order.OrderID)) return false;
+    seenOrderIds.add(order.OrderID);
+    return true;
+  });
 }
 
 async function fetchFleetOrders(): Promise<Order[]> {

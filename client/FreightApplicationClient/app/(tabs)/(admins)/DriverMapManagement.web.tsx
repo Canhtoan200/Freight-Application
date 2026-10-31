@@ -101,9 +101,9 @@ const ORDERS_BY_STATUS_URL =
 const DRIVERS_URL = 'https://freight-application-server.onrender.com/api/v1/drivers/getAllDrivers';
 const ASSIGN_DRIVER_URL =
   'https://freight-application-server.onrender.com/api/v1/drivers/createDriverOrderDetail';
-const ORDERS_STATUS = 'Đang dỡ hàng';
+const ORDERS_STATUSES = ['Đã tiếp nhận', 'Đang dỡ hàng'] as const;
 const ACTIVE_FLEET_STATUSES = new Set([
-  ORDERS_STATUS,
+  ...ORDERS_STATUSES,
   'Tài xế đang đi!',
   'Đã nhận hàng',
   'Đã tới ga',
@@ -206,18 +206,27 @@ const fetchGoongDirections = async (origin: Coordinate, destination: Coordinate)
 };
 
 async function fetchOrdersByStatus(): Promise<Order[]> {
-  const url = `${ORDERS_BY_STATUS_URL}?shipping_status=${encodeURIComponent(ORDERS_STATUS)}`;
-  const response = await fetch(url);
-  const payload = (await response.json()) as { data?: Order[]; message?: string };
+  const results = await Promise.all(ORDERS_STATUSES.map(async (status) => {
+    const url = `${ORDERS_BY_STATUS_URL}?shipping_status=${encodeURIComponent(status)}`;
+    const response = await fetch(url);
+    const payload = (await response.json()) as { data?: Order[]; message?: string };
 
-  if (!response.ok) {
-    throw new Error(payload.message || 'Không thể tải đơn hàng.');
-  }
-  if (!Array.isArray(payload.data)) {
-    throw new Error('Máy chủ trả về danh sách đơn hàng không hợp lệ.');
-  }
+    if (!response.ok) {
+      throw new Error(payload.message || 'Không thể tải đơn hàng.');
+    }
+    if (!Array.isArray(payload.data)) {
+      throw new Error('Máy chủ trả về danh sách đơn hàng không hợp lệ.');
+    }
 
-  return payload.data;
+    return payload.data;
+  }));
+
+  const seenOrderIds = new Set<number>();
+  return results.flat().filter((order) => {
+    if (seenOrderIds.has(order.OrderID)) return false;
+    seenOrderIds.add(order.OrderID);
+    return true;
+  });
 }
 
 async function fetchFleetOrders(): Promise<Order[]> {
