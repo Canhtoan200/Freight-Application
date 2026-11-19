@@ -343,6 +343,7 @@ export default function DriverMapManagement({
   const mapRef = useRef<any>(null);
   const truckMarkerRef = useRef<any>(null);
   const allDriverMarkersRef = useRef<any[]>([]);
+  const geocodeCacheRef = useRef(new Map<string, Coordinate>());
   const hasFitDriverBoundsRef = useRef(false);
   const trackingTimerRef = useRef<number | null>(null);
   const orderRequestRef = useRef(0);
@@ -525,9 +526,13 @@ export default function DriverMapManagement({
     allDriverMarkersRef.current = [];
 
     const loadDriverMarkers = async () => {
-      const coordinatesByAddress = new Map<string, Coordinate>();
-      const fallbackCoordinate = await geocodeAddress(DRIVER_START_ADDRESS);
-      coordinatesByAddress.set(DRIVER_START_ADDRESS, fallbackCoordinate);
+      const cachedGeocode = async (address: string) => {
+        const cached = geocodeCacheRef.current.get(address);
+        if (cached) return cached;
+        const coordinate = await geocodeAddress(address);
+        geocodeCacheRef.current.set(address, coordinate);
+        return coordinate;
+      };
 
       const locatedDrivers = await Promise.all(drivers.map(async (driver) => {
         const livePosition = getDriverPosition(driver);
@@ -535,15 +540,18 @@ export default function DriverMapManagement({
 
         const address = driver.driver_link?.trim() || DRIVER_START_ADDRESS;
         try {
-          let coordinate = coordinatesByAddress.get(address);
-          if (!coordinate) {
-            coordinate = await geocodeAddress(address);
-            coordinatesByAddress.set(address, coordinate);
-          }
-          return { driver, coordinate, isFallback: !driver.driver_link?.trim() };
+          return {
+            driver,
+            coordinate: await cachedGeocode(address),
+            isFallback: !driver.driver_link?.trim(),
+          };
         } catch (error) {
           console.warn(`Không thể xác định vị trí tài xế #${driver.DriverIDs}; dùng vị trí mô phỏng mặc định.`, error);
-          return { driver, coordinate: fallbackCoordinate, isFallback: true };
+          return {
+            driver,
+            coordinate: await cachedGeocode(DRIVER_START_ADDRESS),
+            isFallback: true,
+          };
         }
       }));
 
