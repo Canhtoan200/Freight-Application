@@ -30,6 +30,8 @@ type Driver = {
   DriverIDs: number;
   driver_name?: string;
   driver_link?: string;
+  position_latitude?: number | string | null;
+  position_longitude?: number | string | null;
   driver_license_plate_number?: string;
   driver_phone_number?: string;
 };
@@ -111,6 +113,21 @@ const ACTIVE_FLEET_STATUSES = new Set([
 const DRIVER_START_ADDRESS = 'KDC Nam Thịnh, An Bình, Dĩ An, Bình Dương';
 const MAPLIBRE_JS = 'https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.js';
 const MAPLIBRE_CSS = 'https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.css';
+const DRIVER_POSITION_REFRESH_MS = 5000;
+
+function getDriverPosition(driver: Driver): Coordinate | null {
+  if (driver.position_latitude == null || driver.position_longitude == null ||
+      driver.position_latitude === '' || driver.position_longitude === '') {
+    return null;
+  }
+  const latitude = Number(driver.position_latitude);
+  const longitude = Number(driver.position_longitude);
+  if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 ||
+      !Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+    return null;
+  }
+  return [longitude, latitude];
+}
 
 const decodePolyline = (encoded: string): Coordinate[] => {
   if (!encoded) return [];
@@ -326,6 +343,7 @@ export default function DriverMapManagement({
   const mapRef = useRef<any>(null);
   const truckMarkerRef = useRef<any>(null);
   const allDriverMarkersRef = useRef<any[]>([]);
+  const hasFitDriverBoundsRef = useRef(false);
   const trackingTimerRef = useRef<number | null>(null);
   const orderRequestRef = useRef(0);
   const driverRequestRef = useRef(0);
@@ -398,6 +416,19 @@ export default function DriverMapManagement({
       driverRequestRef.current += 1;
     };
   }, [readOnly, partnerMode]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void fetchDrivers(partnerMode)
+        .then((driverList) => setDrivers(driverList))
+        .catch((error: unknown) => {
+          console.error('Không thể cập nhật vị trí tài xế:', error);
+          setErrorMessage('Không thể cập nhật vị trí tài xế.');
+        });
+    }, DRIVER_POSITION_REFRESH_MS);
+
+    return () => window.clearInterval(timer);
+  }, [partnerMode]);
 
   useEffect(() => {
     if (!readOnly) return;
@@ -499,6 +530,9 @@ export default function DriverMapManagement({
       coordinatesByAddress.set(DRIVER_START_ADDRESS, fallbackCoordinate);
 
       const locatedDrivers = await Promise.all(drivers.map(async (driver) => {
+        const livePosition = getDriverPosition(driver);
+        if (livePosition) return { driver, coordinate: livePosition, isFallback: false };
+
         const address = driver.driver_link?.trim() || DRIVER_START_ADDRESS;
         try {
           let coordinate = coordinatesByAddress.get(address);
@@ -579,9 +613,10 @@ export default function DriverMapManagement({
         allDriverMarkersRef.current.push(marker);
       }
       const coordinates = locatedDrivers.map(({ coordinate }) => coordinate);
-      if (coordinates.length === 1) {
+      if (!hasFitDriverBoundsRef.current && coordinates.length === 1) {
         map.easeTo({ center: coordinates[0], zoom: 12, duration: 700 });
-      } else if (coordinates.length > 1) {
+        hasFitDriverBoundsRef.current = true;
+      } else if (!hasFitDriverBoundsRef.current && coordinates.length > 1) {
         const longitudes = coordinates.map(([longitude]) => longitude);
         const latitudes = coordinates.map(([, latitude]) => latitude);
         map.fitBounds(
@@ -591,6 +626,7 @@ export default function DriverMapManagement({
           ],
           { padding: 80, maxZoom: 12, duration: 700 },
         );
+        hasFitDriverBoundsRef.current = true;
       }
     };
 
@@ -665,7 +701,7 @@ export default function DriverMapManagement({
         ? (driver.driver_link?.trim() || 'Ga Giáp Bát, Hà Nội')
         : DRIVER_START_ADDRESS;
       const [driverLocation, destination] = await Promise.all([
-        geocodeAddress(driverAddress),
+        getDriverPosition(driver) ?? geocodeAddress(driverAddress),
         orderCoordinate
           ? Promise.resolve(orderCoordinate)
           : geocodeAddress(destinationAddress),

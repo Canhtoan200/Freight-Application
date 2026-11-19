@@ -52,6 +52,8 @@ type Driver = {
   accountID?: number;
   driver_name?: string;
   driver_link?: string;
+  position_latitude?: number | string | null;
+  position_longitude?: number | string | null;
   driver_license_plate_number?: string;
   driver_phone_number?: string;
   amount_of_gas?: string;
@@ -124,6 +126,22 @@ const GOONG_API_KEY = process.env.EXPO_PUBLIC_GOONG_API_KEY ?? '';
 const GOONG_STYLE_URL = `https://tiles.goong.io/assets/goong_map_web.json?api_key=${encodeURIComponent(GOONG_MAPTILES_KEY)}`;
 const DEFAULT_COORDINATE: Coordinate = [106.7009, 10.7769];
 const DRIVER_START_ADDRESS = 'KDC Nam Thịnh, An Bình, Dĩ An, Bình Dương';
+const DRIVER_POSITION_REFRESH_MS = 5000;
+
+function getDriverPosition(driver: Driver): Coordinate | null {
+  if (driver.position_latitude == null || driver.position_longitude == null ||
+      driver.position_latitude === '' || driver.position_longitude === '') {
+    return null;
+  }
+  const latitude = Number(driver.position_latitude);
+  const longitude = Number(driver.position_longitude);
+  if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 ||
+      !Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+    return null;
+  }
+  return [longitude, latitude];
+}
+
 const ACTIVE_FLEET_STATUSES = new Set([
   'Đã tiếp nhận',
   'Đang dỡ hàng',
@@ -152,6 +170,7 @@ export default function DriverMapManagement({
   const insets = useSafeAreaInsets();
   const cameraRef = useRef<CameraRef | null>(null);
   const geocodeCacheRef = useRef(new globalThis.Map<string, Coordinate>());
+  const hasFitDriverBoundsRef = useRef(false);
   const orderRequestRef = useRef(0);
   const driverRequestRef = useRef(0);
   const trackingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -204,6 +223,19 @@ export default function DriverMapManagement({
       active = false;
     };
   }, [readOnly, partnerMode]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      void fetchDrivers(partnerMode)
+        .then(setDrivers)
+        .catch((error) => {
+          console.error('Không thể cập nhật vị trí tài xế:', error);
+          setErrorMessage('Không thể cập nhật vị trí tài xế.');
+        });
+    }, DRIVER_POSITION_REFRESH_MS);
+
+    return () => clearInterval(timer);
+  }, [partnerMode]);
 
   useEffect(() => {
     if (!readOnly) return;
@@ -290,6 +322,9 @@ export default function DriverMapManagement({
         throw new Error('Không thể xác định vị trí mô phỏng mặc định của tài xế.');
       }
       const locations = await Promise.all(drivers.map(async (driver) => {
+        const livePosition = getDriverPosition(driver);
+        if (livePosition) return { driver, coordinate: livePosition, isFallback: false };
+
         const address = driver.driver_link?.trim();
         if (!address) return { driver, coordinate: fallbackCoordinate, isFallback: true };
         try {
@@ -303,9 +338,10 @@ export default function DriverMapManagement({
       }));
       if (!active) return;
       setLocatedDrivers(locations);
-      if (locations.length === 1) {
+      if (!hasFitDriverBoundsRef.current && locations.length === 1) {
         cameraRef.current?.easeTo({ center: locations[0].coordinate, zoom: 12, duration: 700 });
-      } else if (locations.length > 1) {
+        hasFitDriverBoundsRef.current = true;
+      } else if (!hasFitDriverBoundsRef.current && locations.length > 1) {
         const longitudes = locations.map(({ coordinate }) => coordinate[0]);
         const latitudes = locations.map(({ coordinate }) => coordinate[1]);
         cameraRef.current?.fitBounds(
@@ -317,6 +353,7 @@ export default function DriverMapManagement({
           ],
           { padding: { top: 80, right: 80, bottom: 80, left: 80 }, duration: 700 },
         );
+        hasFitDriverBoundsRef.current = true;
       }
     };
 
@@ -389,7 +426,7 @@ export default function DriverMapManagement({
       const driverAddress = partnerMode
         ? (driver.driver_link?.trim() || 'Ga Giáp Bát, Hà Nội')
         : DRIVER_START_ADDRESS;
-      const coordinate = await resolveAddress(driverAddress);
+      const coordinate = getDriverPosition(driver) ?? await resolveAddress(driverAddress);
       if (requestID !== driverRequestRef.current) return;
 
       if (!coordinate) {
